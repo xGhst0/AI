@@ -1,177 +1,109 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
-IFS=$'\n\t'
 
-log()    { echo -e "\e[1;34m[INFO]\e[0m $*"; }
-warn()   { echo -e "\e[1;33m[WARN]\e[0m $*"; }
-error()  { echo -e "\e[1;31m[ERROR]\e[0m $*" >&2; exit 1; }
+echo "[ORCH] Starting Offline AI CLI Setup"
 
-if [ "$EUID" -eq 0 ]; then
-  error "Please do NOT run this script as root. Run as a normal user."
+# ===== STEP 1: Fix missing GPG keys =====
+echo "[GPG] Checking for missing keys..."
+if sudo apt-get update 2>&1 | grep -q 'NO_PUBKEY'; then
+  KEY=$(sudo apt-get update 2>&1 | grep 'NO_PUBKEY' | head -n1 | awk '{print $NF}')
+  echo "[GPG] Importing missing key $KEY..."
+  sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys "$KEY" || echo "[GPG] Failed to import $KEY"
+  sudo apt-get update || echo "[GPG] Update failed after key import"
+else
+  echo "[GPG] No missing keys detected."
 fi
 
-API_KEY=""
-
-# Parse optional -apikey argument
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    -apikey)
-      shift
-      if [[ $# -eq 0 ]]; then
-        error "Missing value for -apikey"
-      fi
-      API_KEY="$1"
-      shift
-      ;;
-    *)
-      error "Unknown argument: $1"
-      ;;
-  esac
+# ===== STEP 2: Install dependencies =====
+echo "[DEPS] Installing system dependencies..."
+pkgs=(curl wget unzip python3 python3-pip git gnupg)
+for i in {1..3}; do
+  if sudo apt-get update && sudo apt-get install -y "${pkgs[@]}"; then
+    echo "[DEPS] Dependencies installed."
+    break
+  fi
+  echo "[DEPS] Attempt $i failed; cleaning cache..."
+  sudo rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+  sleep 2
 done
 
-AI_DIR="$HOME/.ai_cli"
-VENV_DIR="$AI_DIR/venv"
-AI_SCRIPT="$AI_DIR/ai_cli.py"
-WRAPPER="/usr/local/bin/ai"
-HISTORY_FILE="$HOME/.ai_cli/history.json"
+# ===== STEP 3: Model selection =====
+declare -A MODEL_URLS=(
+  ["Nidum"]="https://example.com/nidum.gguf"
+  ["Osmosis"]="https://example.com/osmosis.gguf"
+  ["Qwen3"]="https://example.com/qwen3.gguf"
+)
+MODEL_NAMES=("Nidum" "Osmosis" "Qwen3")
 
-# Determine shell config file to edit
-user_shell="$(basename "$SHELL")"
-case "$user_shell" in
-  bash) SHELL_RC="$HOME/.bashrc" ;;
-  zsh)  SHELL_RC="$HOME/.zshrc" ;;
-  *)    SHELL_RC="$HOME/.profile" ;;  # fallback
-esac
-
-log "Detected shell: $user_shell"
-log "Will save API key to $SHELL_RC"
-
-log "Removing any previous AI CLI installation..."
-sudo rm -f "$WRAPPER" || true
-rm -rf "$AI_DIR"
-log "Cleanup done."
-
-log "Updating package list and installing dependencies..."
-sudo apt update
-sudo apt install -y python3 python3-venv python3-pip curl jq
-
-log "Creating Python virtual environment at $VENV_DIR..."
-python3 -m venv "$VENV_DIR"
-
-log "Activating virtual environment and installing OpenAI Python client..."
-source "$VENV_DIR/bin/activate"
-pip install --upgrade pip
-pip install openai
-
-log "Writing AI CLI Python script to $AI_SCRIPT..."
-mkdir -p "$AI_DIR"
-cat > "$AI_SCRIPT" << 'EOF'
-#!/usr/bin/env python3
-import os, sys, json, openai
-
-HISTORY_FILE = os.path.expanduser("~/.ai_cli/history.json")
-MODEL = "gpt-3.5-turbo"
-
-def load_history():
-    if not os.path.exists(HISTORY_FILE):
-        return []
-    try:
-        with open(HISTORY_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return []
-
-def save_history(history):
-    try:
-        with open(HISTORY_FILE, "w") as f:
-            json.dump(history, f, indent=2)
-    except Exception as e:
-        print(f"❌ Failed to save conversation history: {e}")
-
-def main():
-    args = sys.argv[1:]
-    if not args:
-        print("Usage:\n  ai <prompt>\n  ai -reset\n  ai -finish")
-        return
-
-    cmd = args[0].lower()
-    if cmd in ("-reset", "--reset"):
-        save_history([])
-        print("✅ Conversation memory reset.")
-        return
-    if cmd in ("-finish", "--finish"):
-        save_history([])
-        print("👋 Conversation finished and memory cleared.")
-        return
-
-    prompt = " ".join(args)
-    history = load_history()
-    history.append({"role": "user", "content": prompt})
-
-    openai.api_key = os.getenv("OPENAI_API_KEY")
-    if not openai.api_key:
-        print("❌ OPENAI_API_KEY environment variable not set. Please set it and retry.")
-        sys.exit(1)
-
-    try:
-        resp = openai.chat.completions.create(
-            model=MODEL,
-            messages=history,
-            temperature=0.7,
-        )
-        reply = resp.choices[0].message.content.strip()
-        print(reply)
-        history.append({"role": "assistant", "content": reply})
-        save_history(history)
-    except Exception as e:
-        print(f"❌ OpenAI API error: {e}")
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
-EOF
-chmod +x "$AI_SCRIPT"
-
-log "Creating global ai wrapper script at $WRAPPER..."
-sudo tee "$WRAPPER" > /dev/null <<EOF
-#!/bin/bash
-export OPENAI_API_KEY="\$OPENAI_API_KEY"
-"$VENV_DIR/bin/python" "$AI_SCRIPT" "\$@"
-EOF
-sudo chmod +x "$WRAPPER"
-
-if [ -n "$API_KEY" ]; then
-  if [[ "$API_KEY" =~ ^sk- ]]; then
-    log "Using provided API key from -apikey argument."
-    # Remove old keys from shell rc, then add new
-    sed -i '/^export OPENAI_API_KEY=/d' "$SHELL_RC"
-    echo "export OPENAI_API_KEY=\"$API_KEY\"" >> "$SHELL_RC"
-    export OPENAI_API_KEY="$API_KEY"
-    log "API key saved to $SHELL_RC and environment variable set for this session."
-    log "Please reload your shell config by running:"
-    echo "source $SHELL_RC"
-  else
-    warn "Provided API key does not look valid. Please check and rerun script."
+echo "[MODEL] Choose your model:"
+select MODEL in "${MODEL_NAMES[@]}"; do
+  if [[ -n "$MODEL" ]]; then
+    break
   fi
-else
-  if [ -z "${OPENAI_API_KEY-}" ]; then
-    warn "OPENAI_API_KEY is not set in your environment."
-    read -rp "Please enter your OpenAI API key (sk-...): " user_key
-    if [[ "$user_key" =~ ^sk- ]]; then
-      sed -i '/^export OPENAI_API_KEY=/d' "$SHELL_RC"
-      echo "export OPENAI_API_KEY=\"$user_key\"" >> "$SHELL_RC"
-      export OPENAI_API_KEY="$user_key"
-      log "API key saved to $SHELL_RC and environment variable set for this session."
-      log "Please reload your shell config by running:"
-      echo "source $SHELL_RC"
-    else
-      warn "Invalid key format. Please manually set OPENAI_API_KEY environment variable later."
-    fi
-  else
-    log "OPENAI_API_KEY detected in environment."
-  fi
+done
+
+MODEL_URL="${MODEL_URLS[$MODEL]}"
+MODEL_DIR="$HOME/.ai_cli_offline/models"
+mkdir -p "$MODEL_DIR"
+MODEL_PATH="$MODEL_DIR/$MODEL.gguf"
+
+echo "[MODEL] Downloading $MODEL model..."
+wget -q -O "$MODEL_PATH" "$MODEL_URL" || curl -sL -o "$MODEL_PATH" "$MODEL_URL"
+
+# ===== STEP 4: Install AI core binary =====
+CORE_URL="https://example.com/ai_core"
+CORE_BIN="$HOME/.ai_cli_offline/bin/ai_core"
+mkdir -p "$(dirname "$CORE_BIN")"
+echo "[CORE] Downloading AI core binary..."
+wget -q -O "$CORE_BIN" "$CORE_URL" || curl -sL -o "$CORE_BIN" "$CORE_URL"
+chmod +x "$CORE_BIN"
+
+# ===== STEP 5: Install manager AI command wrapper =====
+AI_WRAPPER="$HOME/.ai_cli_offline/bin/ai"
+mkdir -p "$(dirname "$AI_WRAPPER")"
+cat > "$AI_WRAPPER" << 'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+CORE="$HOME/.ai_cli_offline/bin/ai_core"
+HIST="$HOME/.ai_cli_offline/conversations/history.txt"
+LOGS="$HOME/.ai_cli_offline/logs"
+mkdir -p "$(dirname "$HIST")" "$LOGS"
+
+query="$*"
+echo "User: $query" >> "$HIST"
+
+if [[ "$query" == run\ * ]]; then
+  cmd="${query#run }"
+  echo "[AI-CMD] Running shell command: $cmd"
+  output=$(eval "$cmd" 2>&1)
+  echo "$output"
+  echo -e "Command: $cmd\n$output\n" >> "$LOGS/last_command.txt"
+  exit 0
 fi
 
-log "Installation complete!"
-log "Use 'ai \"your prompt\"' to talk with the AI."
-exit 0
+if [[ "$query" == save\ * ]]; then
+  filename=$(echo "$query" | awk '{print $2}')
+  content=$(echo "$query" | cut -d' ' -f3-)
+  echo "$content" > "$filename"
+  echo "Saved to $filename"
+  exit 0
+fi
+
+"$CORE" -p "$query"
+EOF
+chmod +x "$AI_WRAPPER"
+
+# ===== STEP 6: Confirm CLI working =====
+if command -v ai >/dev/null; then
+  echo "[DONE] AI CLI is globally available."
+else
+  echo 'export PATH="$HOME/.ai_cli_offline/bin:$PATH"' >> "$HOME/.bashrc"
+  export PATH="$HOME/.ai_cli_offline/bin:$PATH"
+  echo "[DONE] Added AI CLI to PATH. Restart terminal or source ~/.bashrc."
+fi
+
+echo "✅ Setup complete. You can now run:"
+echo "   ai \"what ports are open\""
+echo "   ai \"run netstat -tuln\""
+echo "   ai \"save test.sh echo hello world\""
