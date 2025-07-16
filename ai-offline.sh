@@ -8,7 +8,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # GitHub repository for updates
-GITHUB_REPO="https://github.com/yourusername/ai-cli-offline"
+GITHUB_REPO="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/feature"*
 DOC_FILE="/usr/local/share/doc/ai-cli.md"
 
 function log() {
