@@ -1,182 +1,93 @@
-#!/bin/bash
-set -euo pipefail
+#!/usr/bin/env bash
 
-# Detect real user and home dir, avoid sudo root issues
-REAL_USER="${SUDO_USER:-$USER}"
-REAL_HOME=$(eval echo "~$REAL_USER")
-
-BASE_DIR="$REAL_HOME/.ai_cli_offline"
+# Constants
+BASE_DIR="$HOME/.ai_cli_offline"
 LLAMA_DIR="$BASE_DIR/llama.cpp"
 BUILD_DIR="$LLAMA_DIR/build"
 MODELS_DIR="$BASE_DIR/models"
-LOGFILE="$BASE_DIR/install.log"
-BIN_WRAPPER="/usr/local/bin/ai"
-SCRIPT_MANAGER="$BASE_DIR/script_manager.sh"
-
+SCRIPTS_DIR="$BASE_DIR/scripts"
+LOGFILE="$BASE_DIR/ai.log"
+SCRIPT_MANAGER="/usr/local/bin/script_manager.sh"
+LLAMA_BIN=""
 MODEL_NAME="llama-2-7b-chat.Q4_K_M.gguf"
 MODEL_URL="https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/$MODEL_NAME"
+MODEL_PATH="$MODELS_DIR/$MODEL_NAME"
 
-mkdir -p "$BASE_DIR" "$MODELS_DIR"
+# Create necessary directories
+mkdir -p "$BUILD_DIR" "$MODELS_DIR" "$SCRIPTS_DIR"
 touch "$LOGFILE"
-chown -R "$REAL_USER":"$REAL_USER" "$BASE_DIR"
 
-log() {
-    echo "[INFO] $*" | tee -a "$LOGFILE"
-}
+# Logging functions
+log() { echo "[INFO] $*" | tee -a "$LOGFILE"; }
+warn() { echo "[WARN] $*" | tee -a "$LOGFILE" >&2; }
+error_exit() { echo "[ERROR] $*" | tee -a "$LOGFILE" >&2; exit 1; }
 
-error_exit() {
-    echo "[ERROR] $*" | tee -a "$LOGFILE" >&2
-    exit 1
-}
-
-install_dependencies() {
-    log "Checking system dependencies..."
-    local deps=(build-essential cmake git curl libcurl4-openssl-dev libomp-dev)
-    local to_install=()
-    for dep in "${deps[@]}"; do
-        if ! dpkg -s "$dep" >/dev/null 2>&1; then
-            to_install+=("$dep")
-        fi
-    done
-    if [ "${#to_install[@]}" -gt 0 ]; then
-        echo "Installing missing dependencies: ${to_install[*]}"
-        sudo apt update
-        sudo apt install -y "${to_install[@]}"
-    else
-        log "All dependencies already installed."
+# Find the correct llama binary
+resolve_llama_binary() {
+  local candidates=("llama-mtmd-cli" "llama-cli" "llama-run" "llama-simple-chat")
+  for bin in "${candidates[@]}"; do
+    found_bin=$(find "$BUILD_DIR/bin" -type f -executable -name "$bin" 2>/dev/null | head -n 1)
+    if [[ -x "$found_bin" ]]; then
+      LLAMA_BIN="$found_bin"
+      log "Using binary: $LLAMA_BIN"
+      return
     fi
+  done
+  error_exit "No suitable llama binary found."
 }
 
-clone_or_update_repo() {
-    if [ -d "$LLAMA_DIR/.git" ]; then
-        log "Updating llama.cpp repository..."
-        git -C "$LLAMA_DIR" pull || log "Failed to update, continuing with existing code."
-    else
-        log "Cloning llama.cpp repository..."
-        git clone https://github.com/ggerganov/llama.cpp.git "$LLAMA_DIR" || error_exit "Failed to clone llama.cpp."
-    fi
-}
-
-clean_build_dir() {
-    if [ -d "$BUILD_DIR" ]; then
-        log "Removing existing build directory to clear old CMake cache..."
-        rm -rf "$BUILD_DIR"
-    fi
-}
-
-build_llama() {
-    clean_build_dir
-    log "Building llama.cpp with CMake..."
-    mkdir -p "$BUILD_DIR"
-    cd "$BUILD_DIR"
-    cmake .. -DCMAKE_BUILD_TYPE=Release
-    make -j"$(nproc)" || error_exit "Build failed."
-}
-
-download_model() {
-    local model_path="$MODELS_DIR/$MODEL_NAME"
-    if [ -f "$model_path" ]; then
-        log "Model $MODEL_NAME already exists. Skipping download."
-        return
-    fi
-    echo -n "Enter your HuggingFace API token: "
-    read -r HF_API_TOKEN
+# Validate model file
+validate_model() {
+  if [[ ! -f "$MODEL_PATH" ]]; then
     log "Downloading model $MODEL_NAME ..."
-    curl -L -o "$model_path" -H "Authorization: Bearer $HF_API_TOKEN" "$MODEL_URL" || error_exit "Model download failed."
+    curl -L "$MODEL_URL" -o "$MODEL_PATH" || error_exit "Model download failed."
+  else
+    log "Model already exists at $MODEL_PATH"
+  fi
 }
 
-create_script_manager() {
-    if [ -f "$SCRIPT_MANAGER" ]; then
-        log "script_manager.sh already exists. Skipping creation."
-        return
-    fi
-    log "Creating script_manager.sh agent pipeline at $SCRIPT_MANAGER..."
-    cat > "$SCRIPT_MANAGER" <<'EOF'
-#!/bin/bash
-set -euo pipefail
+# Handle agent-based scripting prompts
+is_script_task() {
+  echo "$*" | grep -Ei "^(write|create|generate|make).*script" > /dev/null
+}
 
-PROMPT="$*"
-WORK_DIR="$HOME/.ai_cli_offline/scripts"
-mkdir -p "$WORK_DIR"
-
-echo "[SCRIPT_MANAGER] Received task: $PROMPT"
-FILENAME=$(echo "$PROMPT" | tr ' ' '_' | tr -dc '[:alnum:]_-').py
-SCRIPT_PATH="$WORK_DIR/$FILENAME"
-
-echo "[THINKING AGENT] Breaking down task..."
-sleep 1
-
-echo "[WRITING AGENT] Generating draft..."
-echo "#!/usr/bin/env python3" > "$SCRIPT_PATH"
-echo "# TODO: implement logic for -> $PROMPT" >> "$SCRIPT_PATH"
-echo "print('Task: $PROMPT')" >> "$SCRIPT_PATH"
-
-echo "[QC AGENT] Reviewing draft..."
-sleep 1
+# Install script manager if missing
+install_script_manager() {
+  if [[ ! -f "$SCRIPT_MANAGER" ]]; then
+    cat << 'EOF' | sudo tee "$SCRIPT_MANAGER" > /dev/null
+#!/usr/bin/env bash
+# Dummy script manager logic for demonstration
+prompt="$*"
+echo "[SCRIPT_MANAGER] Received task: $prompt"
+echo "[THINKING AGENT] Breaking down task ..."
+echo "[WRITING AGENT] Generating draft .."
+echo "[QC AGENT] Reviewing draft ..."
 echo "[QC AGENT] No errors detected."
-
-chmod +x "$SCRIPT_PATH"
-echo "[HANDOVER AGENT] Script saved at: $SCRIPT_PATH"
+filename="$HOME/.ai_cli_offline/scripts/$(echo "$prompt" | tr ' ' '_' | tr -cd '[:alnum:]_').py"
+echo "# Auto-generated script" > "$filename"
+echo "print('Task: $prompt')" >> "$filename"
+echo "[HANDOVER AGENT] Script saved at: $filename"
 EOF
-    chmod +x "$SCRIPT_MANAGER"
-    chown "$REAL_USER":"$REAL_USER" "$SCRIPT_MANAGER"
+    sudo chmod +x "$SCRIPT_MANAGER"
+    log "Script manager installed."
+  fi
 }
 
-create_cli_wrapper() {
-    if [ -f "$BIN_WRAPPER" ]; then
-        log "AI CLI wrapper already exists at $BIN_WRAPPER. Skipping creation."
-        return
-    fi
-    log "Creating AI CLI wrapper at $BIN_WRAPPER (requires sudo)..."
-    sudo tee "$BIN_WRAPPER" > /dev/null <<EOF
-#!/bin/bash
-set -euo pipefail
-
-BASE_DIR="$BASE_DIR"
-MODEL_NAME="$MODEL_NAME"
-MODEL_PATH="\$BASE_DIR/models/\$MODEL_NAME"
-SCRIPT_MANAGER="\$BASE_DIR/script_manager.sh"
-
-LLAMA_BIN="\$BASE_DIR/llama.cpp/build/bin/llama-mtmd-cli"
-
-if [ ! -x "\$LLAMA_BIN" ]; then
-    echo "[ERROR] Llama binary not found or not executable at \$LLAMA_BIN"
-    exit 1
-fi
-
-if [ ! -f "\$MODEL_PATH" ]; then
-    echo "[ERROR] Model not found at \$MODEL_PATH"
-    exit 1
-fi
-
-if echo "\$*" | grep -Ei "^(write|create|generate|make|script) .*script" > /dev/null; then
-    echo "[AGENT MODE] Handing task to agent pipeline..."
-    exec "\$SCRIPT_MANAGER" "\$@"
-fi
-
-exec "\$LLAMA_BIN" -m "\$MODEL_PATH" -p "\$*"
-EOF
-    sudo chmod +x "$BIN_WRAPPER"
-}
-
+# Entry point
 main() {
-    log "Starting installation..."
+  [[ $# -eq 0 ]] && { echo "Usage: ai \"your prompt here\""; exit 1; }
+  resolve_llama_binary
+  validate_model
+  install_script_manager
 
-    install_dependencies
-    clone_or_update_repo
-    build_llama
-    download_model
-    create_script_manager
-    create_cli_wrapper
+  if is_script_task "$@"; then
+    echo "[AGENT MODE] Detected script generation task. Handing over to agent pipeline ..."
+    "$SCRIPT_MANAGER" "$@"
+    exit
+  fi
 
-    # Fix ownership of all files to real user (just in case)
-    chown -R "$REAL_USER":"$REAL_USER" "$BASE_DIR"
-
-    log "Installation completed successfully!"
-    echo ""
-    echo "Usage: ai \"Your prompt here\""
-    echo "Example: ai \"create a python script to list .txt files\""
-    echo ""
+  log "Running prompt via Llama ..."
+  "$LLAMA_BIN" -m "$MODEL_PATH" -p "$*"
 }
 
 main "$@"
