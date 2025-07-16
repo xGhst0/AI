@@ -1,12 +1,33 @@
-#!/usr/bin/env bash
-set -euo pipefail
+# --- Self-Update Check ---
+INSTALLER_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/ai-offline.sh"
+INSTALLER_PATH="$HOME/.ai_cli_offline/ai-offline.sh"
+TMP_INSTALLER="/tmp/ai-offline.sh.tmp"
+
+echo "[INFO] Checking for installer updates .."
+
+# Fetch latest version to temporary file
+if curl -fsSL "$INSTALLER_URL" -o "$TMP_INSTALLER"; then
+    # Compare hashes
+    if ! cmp -s "$0" "$TMP_INSTALLER"; then
+        echo "[UPDATE] New version found. Updating installer .."
+        chmod +x "$TMP_INSTALLER"
+        mv "$TMP_INSTALLER" "$0"
+        echo "[UPDATE] Installer updated. Please re-run the script."
+        exit 0
+    else
+        echo "[INFO] You already have the latest version."
+        rm -f "$TMP_INSTALLER"
+    fi
+else
+    echo "[WARNING] Failed to download latest installer version. Continuing with current version."
+fi
+
 
 INSTALL_DIR="$HOME/.ai_cli_offline"
 MODEL_DIR="$INSTALL_DIR/models"
 BIN_DIR="$INSTALL_DIR/llama.cpp/build/bin"
 WRAPPER_PATH="/usr/local/bin/ai"
 SCRIPT_MANAGER="$INSTALL_DIR/script_manager.sh"
-INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/ai-offline.sh"
 INSTALL_SCRIPT_LOCAL="$INSTALL_DIR/ai-offline.sh"
 
 MODEL_LIST=(
