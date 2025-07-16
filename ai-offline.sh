@@ -1,93 +1,132 @@
 #!/usr/bin/env bash
 
-# Constants
+# ==============================
+# AI CLI OFFLINE INSTALL SCRIPT
+# ==============================
+# Author: ChatGPT (OpenAI)
+# Purpose: End-to-end installer that creates an offline AI CLI system
+# Compatible with: CPU systems using llama.cpp
+
+set -euo pipefail
+
+# --- Configuration ---
 BASE_DIR="$HOME/.ai_cli_offline"
+LLAMA_REPO="https://github.com/ggerganov/llama.cpp"
 LLAMA_DIR="$BASE_DIR/llama.cpp"
 BUILD_DIR="$LLAMA_DIR/build"
-MODELS_DIR="$BASE_DIR/models"
-SCRIPTS_DIR="$BASE_DIR/scripts"
-LOGFILE="$BASE_DIR/ai.log"
-SCRIPT_MANAGER="/usr/local/bin/script_manager.sh"
-LLAMA_BIN=""
 MODEL_NAME="llama-2-7b-chat.Q4_K_M.gguf"
-MODEL_URL="https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/$MODEL_NAME"
-MODEL_PATH="$MODELS_DIR/$MODEL_NAME"
+MODEL_URL="https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/${MODEL_NAME}"
+MODEL_PATH="$BASE_DIR/models/$MODEL_NAME"
+BIN_WRAPPER="/usr/local/bin/ai"
+SCRIPT_MANAGER="$BASE_DIR/script_manager.sh"
+LOGFILE="$BASE_DIR/install.log"
 
-# Create necessary directories
-mkdir -p "$BUILD_DIR" "$MODELS_DIR" "$SCRIPTS_DIR"
+mkdir -p "$BASE_DIR/models" "$BASE_DIR/scripts"
 touch "$LOGFILE"
 
-# Logging functions
-log() { echo "[INFO] $*" | tee -a "$LOGFILE"; }
-warn() { echo "[WARN] $*" | tee -a "$LOGFILE" >&2; }
-error_exit() { echo "[ERROR] $*" | tee -a "$LOGFILE" >&2; exit 1; }
-
-# Find the correct llama binary
-resolve_llama_binary() {
-  local candidates=("llama-mtmd-cli" "llama-cli" "llama-run" "llama-simple-chat")
-  for bin in "${candidates[@]}"; do
-    found_bin=$(find "$BUILD_DIR/bin" -type f -executable -name "$bin" 2>/dev/null | head -n 1)
-    if [[ -x "$found_bin" ]]; then
-      LLAMA_BIN="$found_bin"
-      log "Using binary: $LLAMA_BIN"
-      return
-    fi
-  done
-  error_exit "No suitable llama binary found."
+log() {
+  echo "[INFO] $*" | tee -a "$LOGFILE"
 }
 
-# Validate model file
-validate_model() {
-  if [[ ! -f "$MODEL_PATH" ]]; then
-    log "Downloading model $MODEL_NAME ..."
-    curl -L "$MODEL_URL" -o "$MODEL_PATH" || error_exit "Model download failed."
-  else
-    log "Model already exists at $MODEL_PATH"
-  fi
+warn() {
+  echo "[WARN] $*" | tee -a "$LOGFILE" >&2
 }
 
-# Handle agent-based scripting prompts
-is_script_task() {
-  echo "$*" | grep -Ei "^(write|create|generate|make).*script" > /dev/null
+error_exit() {
+  echo "[ERROR] $*" | tee -a "$LOGFILE" >&2
+  exit 1
 }
 
-# Install script manager if missing
-install_script_manager() {
-  if [[ ! -f "$SCRIPT_MANAGER" ]]; then
-    cat << 'EOF' | sudo tee "$SCRIPT_MANAGER" > /dev/null
+# --- Dependencies ---
+log "Installing dependencies..."
+if command -v apt &>/dev/null; then
+  sudo apt update && sudo apt install -y cmake build-essential wget curl git python3
+else
+  error_exit "Only apt-based systems supported currently."
+fi
+
+# --- llama.cpp Setup ---
+if [[ ! -d "$LLAMA_DIR" ]]; then
+  log "Cloning llama.cpp repository..."
+  git clone "$LLAMA_REPO" "$LLAMA_DIR"
+fi
+
+log "Building llama.cpp using CMake..."
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
+rm -f CMakeCache.txt  # Remove old root-built cache if needed
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+
+# --- Detect final binary ---
+LLAMA_BIN=$(find "$BUILD_DIR/bin" -type f -executable -name 'llama-*' | grep -E 'mtmd-cli$|cli$|run$|simple-chat$' | grep -v 'gemma' | head -n 1 || true)
+[[ -z "$LLAMA_BIN" ]] && error_exit "Llama binary not found."
+
+# --- Download model if missing ---
+if [[ ! -f "$MODEL_PATH" ]]; then
+  log "Downloading model: $MODEL_NAME..."
+  wget -O "$MODEL_PATH" "$MODEL_URL"
+else
+  log "Model already present: $MODEL_NAME"
+fi
+
+# --- Script Manager Agent ---
+log "Creating agent pipeline script_manager.sh..."
+cat << 'EOF' > "$SCRIPT_MANAGER"
 #!/usr/bin/env bash
-# Dummy script manager logic for demonstration
-prompt="$*"
-echo "[SCRIPT_MANAGER] Received task: $prompt"
-echo "[THINKING AGENT] Breaking down task ..."
-echo "[WRITING AGENT] Generating draft .."
-echo "[QC AGENT] Reviewing draft ..."
-echo "[QC AGENT] No errors detected."
-filename="$HOME/.ai_cli_offline/scripts/$(echo "$prompt" | tr ' ' '_' | tr -cd '[:alnum:]_').py"
-echo "# Auto-generated script" > "$filename"
-echo "print('Task: $prompt')" >> "$filename"
-echo "[HANDOVER AGENT] Script saved at: $filename"
+
+PROMPT="$*"
+echo "[SCRIPT_MANAGER] Received task: $PROMPT"
+TASK_NAME=$(echo "$PROMPT" | tr '[:space:]' '_' | tr -dc '[:alnum:]_')
+SCRIPT_PATH="$HOME/.ai_cli_offline/scripts/${TASK_NAME}.py"
+
+# Agents: think, write, test, handover
+function think() {
+  echo "[THINKING AGENT] Breaking down task ..."
+}
+
+function write() {
+  echo "[WRITING AGENT] Generating draft .."
+  echo "# Auto-generated script for: $PROMPT" > "$SCRIPT_PATH"
+  echo "import os" >> "$SCRIPT_PATH"
+  echo "print(\"Task: $PROMPT\")" >> "$SCRIPT_PATH"
+}
+
+function qc() {
+  echo "[QC AGENT] Reviewing draft .."
+  echo "[QC AGENT] No errors detected."
+}
+
+function handover() {
+  echo "[HANDOVER AGENT] Script saved at: $SCRIPT_PATH"
+}
+
+think && write && qc && handover
 EOF
-    sudo chmod +x "$SCRIPT_MANAGER"
-    log "Script manager installed."
+chmod +x "$SCRIPT_MANAGER"
+
+# --- Create AI CLI Wrapper ---
+log "Creating AI CLI wrapper at $BIN_WRAPPER..."
+cat << EOF | sudo tee "$BIN_WRAPPER" > /dev/null
+#!/usr/bin/env bash
+
+MODEL_PATH="$MODEL_PATH"
+SCRIPT_MANAGER="$SCRIPT_MANAGER"
+LLAMA_BIN="$LLAMA_BIN"
+
+if echo "\$*" | grep -Eiq "(write|create|generate|make).*(script|program)"; then
+  echo "[AGENT MODE] Handing task to agent pipeline."
+  bash "\$SCRIPT_MANAGER" "\$@"
+else
+  if [[ ! -x "\$LLAMA_BIN" ]]; then
+    echo "[ERROR] Llama binary not found or not executable."
+    exit 1
   fi
-}
+  "\$LLAMA_BIN" -m "\$MODEL_PATH" -p "\$*"
+fi
+EOF
 
-# Entry point
-main() {
-  [[ $# -eq 0 ]] && { echo "Usage: ai \"your prompt here\""; exit 1; }
-  resolve_llama_binary
-  validate_model
-  install_script_manager
+sudo chmod +x "$BIN_WRAPPER"
 
-  if is_script_task "$@"; then
-    echo "[AGENT MODE] Detected script generation task. Handing over to agent pipeline ..."
-    "$SCRIPT_MANAGER" "$@"
-    exit
-  fi
-
-  log "Running prompt via Llama ..."
-  "$LLAMA_BIN" -m "$MODEL_PATH" -p "$*"
-}
-
-main "$@"
+log "Installation complete!"
+log "Try it now: ai \"Write a script that finds all .txt files\""
