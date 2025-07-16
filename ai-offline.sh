@@ -1,144 +1,119 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# === CONFIG === #
+# Colours for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# GitHub repository for updates
+GITHUB_REPO="https://github.com/xGhst0/AI"
+FEATURE_BASE="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main"
+
+# Install pathing
 INSTALL_DIR="$HOME/.ai_cli_offline"
 VENV_DIR="$INSTALL_DIR/venv"
-BIN_DIR="$INSTALL_DIR/llama.cpp/build/bin"
-SCRIPT_MANAGER="$INSTALL_DIR/script_manager.sh"
-WRAPPER_PATH="/usr/local/bin/ai"
 MODEL_DIR="$INSTALL_DIR/models"
-MODEL_NAME="llama-2-7b-chat.Q4_K_M.gguf"
-MODEL_PATH="$MODEL_DIR/$MODEL_NAME"
-INSTALLER_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/ai-offline.sh"
-TMP_INSTALLER="/tmp/ai-offline.sh.tmp"
-LLAMA_REPO="https://github.com/ggerganov/llama.cpp"
-MODEL_PRIMARY="https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/$MODEL_NAME"
-MODEL_SECONDARY="https://huggingface.co/alternate/path/to/$MODEL_NAME"  # Update as needed
-FEATURE_URL_BASE="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main"
+MODEL_NAME="TheBloke/Mistral-7B-Instruct-v0.1-GGUF"
+MODEL_CACHE="$HOME/.cache/huggingface/hub"
 
-# Download and apply feature update by number
-apply_feature_update() {
-  local feature_number="$1"
-  local feature_url="$FEATURE_URL_BASE/feature${feature_number}.sh"
-  local feature_script="/tmp/feature${feature_number}.sh"
+function log() { echo -e "${YELLOW}[INFO]${NC} $1"; }
+function success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+function error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
-  echo "[INFO] Downloading feature #$feature_number from $feature_url ..."
-  if curl -fsSL "$feature_url" -o "$feature_script"; then
-    echo "[INFO] Running feature update script: feature${feature_number}.sh"
-    chmod +x "$feature_script"
-    bash "$feature_script"
-    echo "[SUCCESS] Feature #$feature_number applied."
-    rm -f "$feature_script"
-  else
-    echo "[ERROR] Failed to download feature #$feature_number. Skipping."
-  fi
-}
-
-# === LOG FUNCTIONS === #
-function info()  { echo -e "\033[1;33m[INFO]\033[0m $1"; }
-function warn()  { echo -e "\033[1;35m[WARN]\033[0m $1" >&2; }
-function error_exit() { echo -e "\033[1;31m[ERROR]\033[0m $1" >&2; exit 1; }
-
-# === SELF-UPDATE CHECK === #
-info "Checking for installer updates ..."
-if curl -fsSL "$INSTALLER_URL" -o "$TMP_INSTALLER"; then
-    if ! cmp -s "$0" "$TMP_INSTALLER"; then
-        info "New version of ai-offline.sh found. Applying update."
-        chmod +x "$TMP_INSTALLER"
-        mv "$TMP_INSTALLER" "$0"
-        info "Updated successfully. Please re-run the script."
-        exit 0
-    else
-        rm -f "$TMP_INSTALLER"
-    fi
-else
-    warn "Failed to download installer update. Continuing ..."
+# Root check
+if [[ $EUID -ne 0 ]]; then
+  error "This script must be run as root."
+  exit 1
 fi
 
-# === CLEAN INSTALL === #
-info "Preparing installation at $INSTALL_DIR ..."
-rm -rf "$INSTALL_DIR"
-mkdir -p "$MODEL_DIR"
-apply_feature_update
-# === INSTALL DEPENDENCIES === #
-info "Installing required system packages ..."
-sudo apt update -y && sudo apt install -y build-essential cmake curl git python3 python3-venv
+log "Starting AI CLI environment installation."
 
-# === CREATE VIRTUAL ENVIRONMENT === #
-info "Creating Python virtual environment ..."
+# Update system
+log "Updating system packages..."
+apt-get update -y && apt-get upgrade -y || log "System update failed, continuing."
+
+# Install base dependencies
+log "Installing system dependencies..."
+apt-get install -y python3 python3-venv python3-pip git curl wget build-essential ca-certificates unzip jq || error "Failed to install dependencies."
+
+# Prepare directories
+mkdir -p "$INSTALL_DIR" "$MODEL_DIR"
+
+# Create virtual environment
+log "Creating isolated Python virtual environment..."
 python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
 
-info "Upgrading pip inside virtual environment ..."
-pip install --upgrade pip setuptools wheel
+# Upgrade pip inside venv
+log "Upgrading pip and tools..."
+pip install --upgrade pip setuptools wheel || log "Pip upgrade failed."
 
-info "Installing Python packages inside virtual environment ..."
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-pip install transformers accelerate bitsandbytes huggingface-hub sentence-transformers chromadb langchain tiktoken crewai[tools] autogen-core wikipedia beautifulsoup4 duckduckgo-search
+# Install Python AI packages
+log "Installing Python AI packages..."
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu || pip install torch torchvision torchaudio
 
-# === CLONE LLAMA.CPP === #
-info "Cloning llama.cpp repository ..."
-git clone "$LLAMA_REPO" "$INSTALL_DIR/llama.cpp"
+pip install transformers accelerate bitsandbytes huggingface-hub sentence-transformers chromadb langchain tiktoken autogen-core wikipedia beautifulsoup4 duckduckgo-search pipx
 
-info "Building llama.cpp ..."
-mkdir -p "$INSTALL_DIR/llama.cpp/build"
-cd "$INSTALL_DIR/llama.cpp/build"
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
+# Install crewai without extras (tools not supported in 0.1.0)
+pip install crewai==0.1.0 || log "CrewAI install failed."
 
-# === DOWNLOAD MODEL === #
-info "Downloading LLM model: $MODEL_NAME ..."
-if ! curl -fLo "$MODEL_PATH" "$MODEL_PRIMARY"; then
-    warn "Primary model download failed. Trying fallback ..."
-    curl -fLo "$MODEL_PATH" "$MODEL_SECONDARY" || error_exit "Model download failed from all sources."
-fi
+# Cache the model
+log "Downloading and caching model..."
+python3 - << PYTHON
+from huggingface_hub import snapshot_download
+try:
+  snapshot_download(repo_id="$MODEL_NAME")
+except Exception as e:
+  print(f"[ERROR] Model download failed: {e}")
+PYTHON
 
-# === SCRIPT MANAGER === #
-info "Creating script manager logic ..."
-cat << 'EOF' > "$SCRIPT_MANAGER"
+# Create CLI wrapper
+CLI_BIN="/usr/local/bin/ai"
+log "Creating CLI at $CLI_BIN"
+cat << 'EOF' > "$CLI_BIN"
 #!/usr/bin/env bash
-set -euo pipefail
 PROMPT="$*"
-echo "[QC AGENT] Reviewing prompt: \$PROMPT"
-echo "[QC AGENT] All checks passed."
-echo "[HANDOVER AGENT] Script saved to: \$HOME/.ai_cli_offline/scripts/$(date +%s)_script.sh"
+VENV="$HOME/.ai_cli_offline/venv"
+source "$VENV/bin/activate"
+python3 - << PY
+from transformers import pipeline
+model = pipeline("text-generation", model="$MODEL_NAME", device_map="auto", trust_remote_code=True)
+output = model("$PROMPT", max_new_tokens=300)[0]['generated_text']
+print(output)
+PY
 EOF
-chmod +x "$SCRIPT_MANAGER"
+chmod +x "$CLI_BIN"
 
-# === AI WRAPPER === #
-info "Creating AI CLI wrapper at $WRAPPER_PATH ..."
-cat << EOF | sudo tee "$WRAPPER_PATH" > /dev/null
-#!/usr/bin/env bash
-set -euo pipefail
-source "$VENV_DIR/bin/activate"
-LLAMA_BIN="$BIN_DIR/llama-simple-chat"
-MODEL="$MODEL_PATH"
-SCRIPT_MANAGER="$SCRIPT_MANAGER"
-PROMPT="\$*"
+# Apply update feature script dynamically
+function apply_feature_update() {
+  FEATURE_NUM="$1"
+  FEATURE_URL="$FEATURE_BASE/feature${FEATURE_NUM}.sh"
+  TARGET_SCRIPT="$INSTALL_DIR/feature${FEATURE_NUM}.sh"
+  log "Downloading feature update #$FEATURE_NUM..."
+  if curl -fsSL "$FEATURE_URL" -o "$TARGET_SCRIPT"; then
+    chmod +x "$TARGET_SCRIPT"
+    log "Running feature update #$FEATURE_NUM..."
+    bash "$TARGET_SCRIPT"
+    success "Feature update #$FEATURE_NUM applied."
+  else
+    error "Failed to download feature script from $FEATURE_URL"
+  fi
+}
 
-if [[ ! -x "\$LLAMA_BIN" ]]; then
-    echo "[ERROR] llama-simple-chat not found at \$LLAMA_BIN" >&2
-    exit 1
-fi
+# Example usage (remove or extend as needed)
+# apply_feature_update 1
 
-if echo "\$PROMPT" | grep -Eiq "^(write|create|generate|make).*(script|program)"; then
-    echo "[AGENT MODE] Delegating to script manager."
-    bash "\$SCRIPT_MANAGER" "\$PROMPT"
-    exit 0
-fi
-
-exec "\$LLAMA_BIN" -m "\$MODEL" -p "\$PROMPT"
-EOF
-
-sudo chmod +x "$WRAPPER_PATH"
-
-# === FINAL TEST === #
-info "Running basic test ..."
-if ai "What is the capital of France?" | grep -iq "paris"; then
-    info "AI CLI is working correctly."
+# Self test
+log "Performing basic CLI test..."
+if ai "What is the capital of Australia?" | grep -qi "Canberra"; then
+  success "AI CLI is working."
 else
-    warn "Basic test failed. Please check the logs."
+  error "AI CLI failed the test."
 fi
 
-info "Installation complete. Use 'ai \"your prompt here\"' to begin."
+success "Installation complete. Run 'ai "your question"' to start."
+log "Use 'apply_feature_update <number>' to pull new features from GitHub."
+
+exit 0
