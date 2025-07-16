@@ -15,7 +15,27 @@ TMP_INSTALLER="/tmp/ai-offline.sh.tmp"
 LLAMA_REPO="https://github.com/ggerganov/llama.cpp"
 MODEL_PRIMARY="https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/$MODEL_NAME"
 MODEL_SECONDARY="https://huggingface.co/alternate/path/to/$MODEL_NAME" # Replace with real fallback
-FEATURE_BASE_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main"
+
+# --- APPLY MODULAR FEATURES ---
+FEATURE_BASE_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/feature"
+MAX_FEATURES=99
+
+info "Applying modular AI CLI features..."
+for i in $(seq 1 $MAX_FEATURES); do
+    FEATURE_URL="${FEATURE_BASE_URL}${i}.sh"
+    FEATURE_SCRIPT="/tmp/feature${i}.sh"
+    
+    # Check if the script exists remotely
+    if curl --silent --head --fail "$FEATURE_URL" > /dev/null; then
+        info "Fetching and applying feature ${i}..."
+        curl -fsSL "$FEATURE_URL" -o "$FEATURE_SCRIPT" || { warn "Failed to download feature${i}.sh"; continue; }
+        chmod +x "$FEATURE_SCRIPT"
+        bash "$FEATURE_SCRIPT" || warn "Feature${i}.sh execution failed."
+    else
+        info "No more features found after feature${i}.sh."
+        break
+    fi
+done
 
 ### --- FUNCTIONS --- ###
 function info() { echo -e "[INFO] $1"; }
