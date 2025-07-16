@@ -15,6 +15,25 @@ TMP_INSTALLER="/tmp/ai-offline.sh.tmp"
 LLAMA_REPO="https://github.com/ggerganov/llama.cpp"
 MODEL_PRIMARY="https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/$MODEL_NAME"
 MODEL_SECONDARY="https://huggingface.co/alternate/path/to/$MODEL_NAME"  # Update as needed
+FEATURE_URL_BASE="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main"
+
+# Download and apply feature update by number
+apply_feature_update() {
+  local feature_number="$1"
+  local feature_url="$FEATURE_URL_BASE/feature${feature_number}.sh"
+  local feature_script="/tmp/feature${feature_number}.sh"
+
+  echo "[INFO] Downloading feature #$feature_number from $feature_url ..."
+  if curl -fsSL "$feature_url" -o "$feature_script"; then
+    echo "[INFO] Running feature update script: feature${feature_number}.sh"
+    chmod +x "$feature_script"
+    bash "$feature_script"
+    echo "[SUCCESS] Feature #$feature_number applied."
+    rm -f "$feature_script"
+  else
+    echo "[ERROR] Failed to download feature #$feature_number. Skipping."
+  fi
+}
 
 # === LOG FUNCTIONS === #
 function info()  { echo -e "\033[1;33m[INFO]\033[0m $1"; }
@@ -41,7 +60,7 @@ fi
 info "Preparing installation at $INSTALL_DIR ..."
 rm -rf "$INSTALL_DIR"
 mkdir -p "$MODEL_DIR"
-
+apply_feature_update
 # === INSTALL DEPENDENCIES === #
 info "Installing required system packages ..."
 sudo apt update -y && sudo apt install -y build-essential cmake curl git python3 python3-venv
