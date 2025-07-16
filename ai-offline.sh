@@ -12,13 +12,17 @@ AI_WRAPPER="/usr/local/bin/ai"
 
 MODEL_NAME="llama-2-7b-chat.Q4_K_M.gguf"
 MODEL_URL="https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/$MODEL_NAME"
-LLAMA_BINARY_NAME="llama-mtmd-cli"
+LLAMA_BINARY_NAME="llama-simple-chat"
 LLAMA_BIN="$BUILD_DIR/bin/$LLAMA_BINARY_NAME"
 
 # === Functions ===
 
 log() {
   echo "[INFO] $*" | tee -a "$LOGFILE"
+}
+
+warn() {
+  echo "[WARN] $*" | tee -a "$LOGFILE" >&2
 }
 
 error_exit() {
@@ -83,14 +87,13 @@ download_model() {
 }
 
 create_script_manager() {
-  # Create a simple stub script_manager.sh if not existing
   if [ ! -f "$SCRIPT_MANAGER" ]; then
     log "Creating stub script_manager.sh..."
     cat > "$SCRIPT_MANAGER" <<'EOF'
 #!/usr/bin/env bash
 echo "[SCRIPT_MANAGER] Received task: $*"
-# This is a placeholder. Replace with your multi-agent logic.
-echo "Stub: No actual script generation implemented."
+# Placeholder multi-agent logic
+echo "Stub: no script generation implemented."
 EOF
     chmod +x "$SCRIPT_MANAGER"
   else
@@ -109,7 +112,12 @@ MODEL_PATH="$MODELS_DIR/$MODEL_NAME"
 SCRIPT_MANAGER="$SCRIPT_MANAGER"
 
 if [[ ! -x "\$LLAMA_BIN" ]]; then
-  echo "[ERROR] llama binary not found or not executable at \$LLAMA_BIN" >&2
+  echo "[ERROR] llama-simple-chat binary not found or not executable at \$LLAMA_BIN" >&2
+  exit 1
+fi
+
+if [[ ! -f "\$MODEL_PATH" ]]; then
+  echo "[ERROR] Model file not found at \$MODEL_PATH" >&2
   exit 1
 fi
 
@@ -122,28 +130,74 @@ if echo "\$PROMPT" | grep -Eiq "^(write|create|generate|make).*(script|program)"
   exit 0
 fi
 
-# Run llama-mtmd-cli with CPU-only options
-exec "\$LLAMA_BIN" -m "\$MODEL_PATH" -p "\$PROMPT" --no-mmproj-offload
+exec "\$LLAMA_BIN" -m "\$MODEL_PATH" -p "\$PROMPT"
 EOF
   sudo chmod +x "$AI_WRAPPER"
   log "AI CLI wrapper script created."
 }
 
-# === Main installation flow ===
+self_heal() {
+  log "Starting self-healing checks..."
 
-log "Starting AI CLI offline installation..."
+  # Check repo presence
+  if [ ! -d "$LLAMA_DIR" ]; then
+    warn "llama.cpp directory missing, recloning..."
+    clone_and_build_llama
+  fi
 
-check_dependencies
+  # Check build presence and binary executable
+  if [ ! -x "$LLAMA_BIN" ]; then
+    warn "llama binary missing or not executable, rebuilding..."
+    cd "$BUILD_DIR"
+    cmake .. -DCMAKE_BUILD_TYPE=Release
+    make -j"$(nproc)" || error_exit "Rebuild failed."
+  fi
 
-clean_previous_install
+  # Check model presence
+  if [ ! -f "$MODELS_DIR/$MODEL_NAME" ]; then
+    warn "Model missing, downloading..."
+    download_model
+  fi
 
-clone_and_build_llama
+  # Check script_manager.sh presence
+  if [ ! -f "$SCRIPT_MANAGER" ]; then
+    warn "script_manager.sh missing, recreating stub..."
+    create_script_manager
+  fi
 
-download_model
+  # Check AI wrapper presence and content
+  if [ ! -x "$AI_WRAPPER" ]; then
+    warn "AI wrapper missing or not executable, recreating..."
+    create_ai_wrapper
+  fi
 
-create_script_manager
+  log "Self-healing complete."
+}
 
-create_ai_wrapper
+main() {
+  mkdir -p "$BASE_DIR" "$MODELS_DIR"
 
-log "[DONE] Installation complete!"
-log "Run AI with: ai \"Your prompt here\""
+  log "Starting AI CLI offline installation..."
+
+  check_dependencies
+
+  clean_previous_install
+
+  clone_and_build_llama
+
+  download_model
+
+  create_script_manager
+
+  create_ai_wrapper
+
+  log "[DONE] Installation complete!"
+  log "Run AI with: ai \"Your prompt here\""
+}
+
+# If run with "selfheal" argument, run self_heal instead of fresh install
+if [[ "${1:-}" == "selfheal" ]]; then
+  self_heal
+else
+  main
+fi
