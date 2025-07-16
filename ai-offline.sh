@@ -9,6 +9,8 @@ MODELS_DIR="$BASE_DIR/models"
 LOGFILE="$BASE_DIR/install.log"
 SCRIPT_MANAGER="$BASE_DIR/script_manager.sh"
 AI_WRAPPER="/usr/local/bin/ai"
+INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/ai-offline.sh"
+INSTALL_SCRIPT_LOCAL="$BASE_DIR/ai-offline.sh"
 
 MODEL_NAME="llama-2-7b-chat.Q4_K_M.gguf"
 MODEL_URL="https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/$MODEL_NAME"
@@ -40,7 +42,7 @@ check_dependencies() {
     fi
   done
   if [ "${#missing[@]}" -gt 0 ]; then
-    log "Missing dependencies detected: ${missing[*]}"
+    log "Installing missing dependencies: ${missing[*]}"
     sudo apt update
     sudo apt install -y "${missing[@]}"
   else
@@ -107,9 +109,38 @@ create_ai_wrapper() {
 #!/usr/bin/env bash
 set -euo pipefail
 
+# === Variables ===
 LLAMA_BIN="$LLAMA_BIN"
 MODEL_PATH="$MODELS_DIR/$MODEL_NAME"
 SCRIPT_MANAGER="$SCRIPT_MANAGER"
+
+UPDATE_CHECK_URL="$INSTALL_SCRIPT_URL"
+INSTALL_SCRIPT_LOCAL="$INSTALL_SCRIPT_LOCAL"
+
+check_for_update() {
+  # Download remote install script to temp file
+  TMP_UPDATE="\$(mktemp)"
+  if curl -sSfL "\$UPDATE_CHECK_URL" -o "\$TMP_UPDATE"; then
+    if ! cmp -s "\$TMP_UPDATE" "\$INSTALL_SCRIPT_LOCAL"; then
+      echo "[UPDATE] New version of install script available."
+      read -rp "Update install script now? [Y/n]: " resp
+      resp=\${resp:-Y}
+      if [[ "\$resp" =~ ^[Yy]$ ]]; then
+        cp "\$TMP_UPDATE" "\$INSTALL_SCRIPT_LOCAL"
+        chmod +x "\$INSTALL_SCRIPT_LOCAL"
+        echo "[UPDATE] Install script updated. Please rerun it manually to update your AI CLI."
+      else
+        echo "[UPDATE] Update skipped by user."
+      fi
+    fi
+  else
+    echo "[UPDATE] Could not check for updates."
+  fi
+  rm -f "\$TMP_UPDATE"
+}
+
+# Run update check in background to avoid delaying prompt (optional)
+check_for_update &
 
 if [[ ! -x "\$LLAMA_BIN" ]]; then
   echo "[ERROR] llama-simple-chat binary not found or not executable at \$LLAMA_BIN" >&2
@@ -195,7 +226,7 @@ main() {
   log "Run AI with: ai \"Your prompt here\""
 }
 
-# If run with "selfheal" argument, run self_heal instead of fresh install
+# === Entry point ===
 if [[ "${1:-}" == "selfheal" ]]; then
   self_heal
 else
