@@ -13,6 +13,8 @@ LLAMA_BIN=""
 MODEL_NAME="llama-2-7b-chat.Q4_K_M.gguf"
 MODEL_URL="https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/$MODEL_NAME"
 
+mkdir /root/.ai_offline/
+touch /root/.ai_offline/install.log
 # Functions for logging and errors
 log() {
     echo "[INFO] $*" | tee -a "$LOGFILE"
