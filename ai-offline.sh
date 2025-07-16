@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
+# Detect real user and home dir, avoid sudo root issues
 REAL_USER="${SUDO_USER:-$USER}"
 REAL_HOME=$(eval echo "~$REAL_USER")
 
@@ -11,11 +12,13 @@ MODELS_DIR="$BASE_DIR/models"
 LOGFILE="$BASE_DIR/install.log"
 BIN_WRAPPER="/usr/local/bin/ai"
 SCRIPT_MANAGER="$BASE_DIR/script_manager.sh"
+
 MODEL_NAME="llama-2-7b-chat.Q4_K_M.gguf"
 MODEL_URL="https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/$MODEL_NAME"
 
 mkdir -p "$BASE_DIR" "$MODELS_DIR"
 touch "$LOGFILE"
+chown -R "$REAL_USER":"$REAL_USER" "$BASE_DIR"
 
 log() {
     echo "[INFO] $*" | tee -a "$LOGFILE"
@@ -54,11 +57,15 @@ clone_or_update_repo() {
     fi
 }
 
-build_llama() {
-    if [ -f "$BUILD_DIR/libllama.so" ] || [ -x "$(find "$BUILD_DIR/bin" -type f -executable -name 'llama-*' | head -n 1)" ]; then
-        log "llama.cpp appears to be built, skipping build step."
-        return
+clean_build_dir() {
+    if [ -d "$BUILD_DIR" ]; then
+        log "Removing existing build directory to clear old CMake cache..."
+        rm -rf "$BUILD_DIR"
     fi
+}
+
+build_llama() {
+    clean_build_dir
     log "Building llama.cpp with CMake..."
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
@@ -112,6 +119,7 @@ chmod +x "$SCRIPT_PATH"
 echo "[HANDOVER AGENT] Script saved at: $SCRIPT_PATH"
 EOF
     chmod +x "$SCRIPT_MANAGER"
+    chown "$REAL_USER":"$REAL_USER" "$SCRIPT_MANAGER"
 }
 
 create_cli_wrapper() {
@@ -129,10 +137,10 @@ MODEL_NAME="$MODEL_NAME"
 MODEL_PATH="\$BASE_DIR/models/\$MODEL_NAME"
 SCRIPT_MANAGER="\$BASE_DIR/script_manager.sh"
 
-LLAMA_BIN=\$(find "\$BASE_DIR/llama.cpp/build/bin" -type f -executable -name 'llama-*' | grep -E 'cli\$|run\$|simple-chat\$' | head -n 1 || true)
+LLAMA_BIN="\$BASE_DIR/llama.cpp/build/bin/llama-mtmd-cli"
 
-if [ -z "\$LLAMA_BIN" ]; then
-    echo "[ERROR] Llama binary not found."
+if [ ! -x "\$LLAMA_BIN" ]; then
+    echo "[ERROR] Llama binary not found or not executable at \$LLAMA_BIN"
     exit 1
 fi
 
@@ -160,6 +168,9 @@ main() {
     download_model
     create_script_manager
     create_cli_wrapper
+
+    # Fix ownership of all files to real user (just in case)
+    chown -R "$REAL_USER":"$REAL_USER" "$BASE_DIR"
 
     log "Installation completed successfully!"
     echo ""
