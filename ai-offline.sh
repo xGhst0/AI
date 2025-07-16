@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+### --- FUNCTIONS --- ###
+function info() { echo -e "[INFO] $1"; }
+function warn() { echo -e "[WARN] $1" >&2; }
+function error_exit() { echo -e "[ERROR] $1" >&2; exit 1; }
+
 ### --- CONFIG --- ###
 INSTALL_DIR="$HOME/.ai_cli_offline"
 VENV_DIR="$INSTALL_DIR/venv"
@@ -14,46 +19,10 @@ INSTALLER_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/ai-of
 TMP_INSTALLER="/tmp/ai-offline.sh.tmp"
 LLAMA_REPO="https://github.com/ggerganov/llama.cpp"
 MODEL_PRIMARY="https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/$MODEL_NAME"
-MODEL_SECONDARY="https://huggingface.co/alternate/path/to/$MODEL_NAME" # Replace with real fallback
+MODEL_SECONDARY="https://huggingface.co/alternate/path/to/$MODEL_NAME"
 
-# --- APPLY MODULAR FEATURES ---
 FEATURE_BASE_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/feature"
 MAX_FEATURES=99
-
-info "Applying modular AI CLI features..."
-for i in $(seq 1 $MAX_FEATURES); do
-    FEATURE_URL="${FEATURE_BASE_URL}${i}.sh"
-    FEATURE_SCRIPT="/tmp/feature${i}.sh"
-    
-    # Check if the script exists remotely
-    if curl --silent --head --fail "$FEATURE_URL" > /dev/null; then
-        info "Fetching and applying feature ${i}..."
-        curl -fsSL "$FEATURE_URL" -o "$FEATURE_SCRIPT" || { warn "Failed to download feature${i}.sh"; continue; }
-        chmod +x "$FEATURE_SCRIPT"
-        bash "$FEATURE_SCRIPT" || warn "Feature${i}.sh execution failed."
-    else
-        info "No more features found after feature${i}.sh."
-        break
-    fi
-done
-
-### --- FUNCTIONS --- ###
-function info() { echo -e "[INFO] $1"; }
-function warn() { echo -e "[WARN] $1" >&2; }
-function error_exit() { echo -e "[ERROR] $1" >&2; exit 1; }
-
-function apply_feature_update() {
-    for i in {1..10}; do
-        URL="$FEATURE_BASE_URL/feature$i.sh"
-        DEST="$INSTALL_DIR/feature$i.sh"
-        if curl -fsSL "$URL" -o "$DEST"; then
-            chmod +x "$DEST"
-            bash "$DEST" || warn "Feature $i failed to apply."
-        else
-            warn "Feature $i not found or download failed."
-        fi
-    done
-}
 
 ### --- SELF UPDATE CHECK --- ###
 info "Checking for installer updates ..."
@@ -89,7 +58,10 @@ info "Upgrading pip inside venv ..."
 pip install --upgrade pip setuptools wheel || warn "Pip upgrade failed."
 
 info "Installing Python AI packages ..."
-pip install torch transformers accelerate bitsandbytes huggingface-hub sentence-transformers chromadb langchain tiktoken crewai autogen-core wikipedia beautifulsoup4 duckduckgo-search pipx || error_exit "Python package installation failed."
+pip install torch transformers accelerate bitsandbytes huggingface-hub \
+            sentence-transformers chromadb langchain tiktoken crewai \
+            autogen-core wikipedia beautifulsoup4 duckduckgo-search pipx \
+            || error_exit "Python package installation failed."
 
 ### --- CLONE & BUILD LLAMA.CPP --- ###
 info "Cloning llama.cpp repo ..."
@@ -142,12 +114,24 @@ fi
 
 exec "\$LLAMA_BIN" -m "\$MODEL" -p "\$PROMPT"
 EOF
-
 sudo chmod +x "$WRAPPER_PATH"
 
 ### --- APPLY FEATURE UPDATES --- ###
-info "Applying feature updates ..."
-apply_feature_update
+info "Applying modular AI CLI features..."
+for i in $(seq 1 "$MAX_FEATURES"); do
+    FEATURE_URL="${FEATURE_BASE_URL}${i}.sh"
+    FEATURE_SCRIPT="/tmp/feature${i}.sh"
+
+    if curl --silent --head --fail "$FEATURE_URL" > /dev/null; then
+        info "Fetching and applying feature ${i}..."
+        curl -fsSL "$FEATURE_URL" -o "$FEATURE_SCRIPT" || { warn "Failed to download feature${i}.sh"; continue; }
+        chmod +x "$FEATURE_SCRIPT"
+        bash "$FEATURE_SCRIPT" || warn "Feature${i}.sh execution failed."
+    else
+        info "No more features found after feature${i}.sh."
+        break
+    fi
+done
 
 ### --- DONE --- ###
 info "Installation complete!"
