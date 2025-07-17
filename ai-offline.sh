@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-echo "Starting script..."
+
 # ========== CONFIGURATION ==========
 INSTALL_DIR="$HOME/.ai_cli_offline"
 LLAMA_DIR="$INSTALL_DIR/llama.cpp"
@@ -26,25 +26,28 @@ log_success() { echo -e "$EMOJI_SUCCESS $1"; }
 log_error()   { echo -e "$EMOJI_ERROR $1"; }
 log_launch()  { echo -e "$EMOJI_ROCKET $1"; }
 
-# ========== UPDATE CHECK ==========
-log_info "Checking for installer updates ..."
-mkdir -p "$INSTALL_DIR"
-if curl -fsSL "$INSTALLER_URL" -o "$TMP_UPDATE"; then
-    if ! cmp -s "$0" "$TMP_UPDATE"; then
-        log_info "Update found! Applying update ..."
-        if mv "$TMP_UPDATE" "$0" 2>/dev/null || sudo mv "$TMP_UPDATE" "$0"; then
-            log_success "Installer updated. Please re-run the script."
-            exit 0
-        else
-            log_error "Failed to apply update. Check permissions."
-            exit 1
-        fi
-    else
-        rm "$TMP_UPDATE"
-        log_info "Installer is up to date."
-    fi
-else
-    log_warn "Could not check for updates. Continuing ..."
+# ========== UPDATE MODE ONLY ==========
+if [[ "${1:-}" == "--update" ]]; then
+  log_info "Checking for installer updates ..."
+  mkdir -p "$INSTALL_DIR"
+  if curl -fsSL "$INSTALLER_URL" -o "$TMP_UPDATE"; then
+      if ! cmp -s "$0" "$TMP_UPDATE"; then
+          log_info "Update found! Applying update ..."
+          if mv "$TMP_UPDATE" "$0" 2>/dev/null || sudo mv "$TMP_UPDATE" "$0"; then
+              log_success "Installer updated. Please re-run the script."
+              exit 0
+          else
+              log_error "Failed to apply update. Check permissions."
+              exit 1
+          fi
+      else
+          rm "$TMP_UPDATE"
+          log_info "Installer is up to date."
+      fi
+  else
+      log_warn "Could not check for updates. Continuing ..."
+  fi
+  exit 0
 fi
 
 # ========== DISK CHECK ==========
@@ -84,7 +87,7 @@ esac
 
 # ========== CLEANUP AND SETUP ==========
 log_info "Cleaning previous installations ..."
-rm -rf "$INSTALL_DIR"
+sudo rm -rf "$INSTALL_DIR"
 mkdir -p "$BUILD_DIR" "$MODEL_DIR"
 
 log_info "Installing system dependencies ..."
@@ -130,7 +133,7 @@ LLAMA_BIN="$BUILD_DIR/bin/llama-simple-chat"
 MODEL_PATH="$MODEL_DIR/$MODEL_FILE"
 SCRIPT_MANAGER="$SCRIPT_MANAGER"
 PROMPT="\$*"
-echo "Running: \$LLAMA_BIN -m \"\\$MODEL_PATH\" -p \"\$PROMPT\""
+echo "Running: \$LLAMA_BIN -m \"\$MODEL_PATH\" -p \"\$PROMPT\""
 if echo "\$PROMPT" | grep -Eiq "^(write|create|generate|make).*(script|program)"; then
     echo "[AGENT MODE] Delegating to script manager ..."
     bash "\$SCRIPT_MANAGER" "\$PROMPT"
