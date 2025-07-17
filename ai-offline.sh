@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ### === VERSION === ###
-echo 'Script v2.7'
+echo 'Script v2.8'
 
 # ========== CONFIGURATION ==========
 INSTALL_DIR="$HOME/.ai_cli_offline"
@@ -151,7 +151,6 @@ log_info "Creating AI CLI wrapper script ..."
 RESOLVED_LLAMA_BIN="$BUILD_DIR/bin/llama-simple-chat"
 RESOLVED_MODEL_PATH="$MODEL_DIR/$MODEL_FILE"
 RESOLVED_SCRIPT_MANAGER="$SCRIPT_MANAGER"
-
 cat << EOF | sudo tee "$AI_WRAPPER" >/dev/null
 #!/usr/bin/env bash
 set -euo pipefail
@@ -175,3 +174,12 @@ EOF
 
 sudo chmod +x "$AI_WRAPPER"
 log_success "AI CLI wrapper created at: $AI_WRAPPER"
+
+# ========== SELF-TEST ==========
+log_info "Verifying wrapper execution ..."
+if ! "$AI_WRAPPER" --help >/dev/null 2>&1; then
+  log_error "Wrapper test failed. Please verify that llama-simple-chat runs manually."
+  echo "Try running: \"$RESOLVED_LLAMA_BIN -m $RESOLVED_MODEL_PATH -p 'Hello'\" manually to debug."
+  exit 1
+fi
+log_success "Wrapper test completed. Installation successful."
