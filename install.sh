@@ -1,9 +1,13 @@
 #!/bin/bash
 
 # --- Configuration ---
-
+# Base URL for GitHub repository (replace with your actual base URL)
+# The image shows "https://github.com/Xghst0/AI/blob/main/install.sh"
+# and "https://github.com/Xghst0/AI/blob/m" for sub-scripts.
+# Assuming 'main' is the branch for install.sh and 'm' for others.
+# Adjust BASE_URL_MAIN and BASE_URL_SUB accordingly.
 BASE_URL_MAIN="https://github.com/Xghst0/AI/blob/main"
-BASE_URL_SUB="https://github.com/Xghst0/AI/blob/main"
+BASE_URL_SUB="https://github.com/Xghst0/AI/blob/m"
 
 INSTALL_SH_URL="${BASE_URL_MAIN}/install.sh"
 MODEL_INSTALL_URL="${BASE_URL_SUB}/Model_Install.sh"
@@ -59,7 +63,7 @@ log_message "INFO" "--- Script Started: install.sh (Version: $SCRIPT_VERSION) --
 check_command() {
     local cmd="$1"
     log_message "INFO" "Checking for required command: $cmd..."
-    # Fix: Added space between 'if' and '!'
+    # Fix: Ensure space between 'if' and '!'
     if ! command -v "$cmd" &> /dev/null; then
         log_message "FATAL" "Error: '$cmd' is not installed. Please install it to proceed."
         exit 1
@@ -141,7 +145,8 @@ perform_self_update() {
         return 0
     fi
 
-    if [ ! -f "$temp_remote_script" ]; then # Fix: Added space between '!' and '-f'
+    # Fix: Ensure space between '[' and '!'
+    if [ ! -f "$temp_remote_script" ]; then
         log_message "WARN" "Failed to download remote install.sh for update check."
         return 0
     fi
@@ -192,9 +197,9 @@ perform_self_update
 # Defines an associative array for sub-scripts: [script_name]="URL;Local_Path"
 declare -A SUB_SCRIPTS
 SUB_SCRIPTS["Model_Install.sh"]="${MODEL_INSTALL_URL};${MODEL_INSTALL_DIR}/Model_Install.sh"
-# Fix: Corrected assignment for Wrapper_Install.sh
+# Fix: Corrected assignment for Wrapper_Install.sh to use associative array syntax
 SUB_SCRIPTS["Wrapper_Install.sh"]="${WRAPPER_INSTALL_URL};${WRAPPER_INSTALL_DIR}/Wrapper_Install.sh"
-SUB_SCRIPTS["Feature_Install.sh"]="${FEATURE_INSTALL_URL};${FEATURE_INSTALL_DIR}/Feature_INSTALL.sh"
+SUB_SCRIPTS["Feature_Install.sh"]="${FEATURE_INSTALL_URL};${FEATURE_INSTALL_DIR}/Feature_Install.sh"
 
 install_sub_script() {
     local script_name="$1"
