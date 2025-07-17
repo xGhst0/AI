@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-echo 'Script v2.3'
+echo 'Script v2.5'
 # ========== CONFIGURATION ==========
 INSTALL_DIR="$HOME/.ai_cli_offline"
 LLAMA_DIR="$INSTALL_DIR/llama.cpp"
@@ -127,7 +127,7 @@ log_info "Cleaning build directory if present ..."
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
-log_info "Building llama.cpp (with curl disabled) ..."
+log_info "🛠️ Building llama.cpp (with curl disabled) ..."
 cmake .. -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF >/dev/null
 make -j$(nproc) >/dev/null
 log_success "llama.cpp built successfully."
@@ -152,13 +152,12 @@ LLAMA_BIN="$BUILD_DIR/bin/llama-simple-chat"
 MODEL_PATH="$MODEL_DIR/$MODEL_FILE"
 SCRIPT_MANAGER="$SCRIPT_MANAGER"
 PROMPT="\$*"
-echo "Running: \$LLAMA_BIN -m \"\$MODEL_PATH\" -p \"\$PROMPT\""
-if echo "\$PROMPT" | grep -Eiq "^(write|create|generate|make).*(script|program)"; then
-    echo "[AGENT MODE] Delegating to script manager ..."
-    bash "\$SCRIPT_MANAGER" "\$PROMPT"
-    exit 0
+echo "🧠 Running: \"\\$LLAMA_BIN\" -m \"\\$MODEL_PATH\" -p \"\\$PROMPT\""
+if echo "\\$PROMPT" | grep -Eiq "^(write|create|generate|make).*(script|program)"; then
+    echo "🤖 [AGENT MODE] Delegating to script manager ..."
+    exec "\\$SCRIPT_MANAGER" "\\$PROMPT"
 fi
-exec "\$LLAMA_BIN" -m "\$MODEL_PATH" -p "\$PROMPT"
+exec "\\$LLAMA_BIN" -m "\\$MODEL_PATH" -p "\\$PROMPT"
 EOF
 sudo chmod +x "$AI_WRAPPER"
 log_success "AI CLI wrapper created at: $AI_WRAPPER"
