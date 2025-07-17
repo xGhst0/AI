@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
+echo "Starting script..."
 # ========== CONFIGURATION ==========
 INSTALL_DIR="$HOME/.ai_cli_offline"
 LLAMA_DIR="$INSTALL_DIR/llama.cpp"
@@ -59,9 +59,9 @@ fi
 
 # ========== MODEL SELECTION ==========
 log_info "Choose a model to install:"
-echo "1) LLaMA 2 7B Chat (Meta)"
-echo "2) Mistral 7B Instruct (MistralAI)"
-echo "3) Zephyr 7B (HuggingFace Community)"
+echo "1) 🧠 LLaMA 2 7B Chat (Meta)"
+echo "2) 💬 Mistral 7B Instruct (MistralAI)"
+echo "3) 🦊 Zephyr 7B (HuggingFace Community)"
 read -rp "Enter your choice [1-3]: " MODEL_CHOICE
 case "$MODEL_CHOICE" in
     1)
@@ -88,25 +88,26 @@ rm -rf "$INSTALL_DIR"
 mkdir -p "$BUILD_DIR" "$MODEL_DIR"
 
 log_info "Installing system dependencies ..."
-sudo apt update && sudo apt install -y cmake build-essential curl python3-venv python3-dev git
+sudo apt-get update -qq >/dev/null && sudo apt-get install -y -qq cmake build-essential curl python3-venv python3-dev git >/dev/null
+log_success "System dependencies installed."
 
 # ========== DOWNLOAD MODEL ==========
-log_info "Downloading model: $MODEL_FILE"
-if ! curl -fSL "$MODEL_URL" -o "$MODEL_DIR/$MODEL_FILE"; then
+log_info "Downloading model: $MODEL_FILE ..."
+if ! curl -fSL "$MODEL_URL" -o "$MODEL_DIR/$MODEL_FILE" 2>/dev/null; then
     log_warn "Primary download failed. Retrying with wget ..."
-    if ! wget "$MODEL_URL" -O "$MODEL_DIR/$MODEL_FILE"; then
+    if ! wget -q "$MODEL_URL" -O "$MODEL_DIR/$MODEL_FILE"; then
         log_error "Failed to download model from both sources."
         exit 1
     fi
 fi
-log_success "Model downloaded."
+log_success "Model downloaded to: $MODEL_DIR/$MODEL_FILE"
 
 # ========== BUILD LLAMA.CPP ==========
-log_info "Cloning and building llama.cpp ..."
-git clone --depth 1 https://github.com/ggerganov/llama.cpp "$LLAMA_DIR"
+log_info "Cloning llama.cpp and building ..."
+git clone --depth 1 https://github.com/ggerganov/llama.cpp "$LLAMA_DIR" >/dev/null
 cd "$BUILD_DIR"
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
+cmake .. -DCMAKE_BUILD_TYPE=Release >/dev/null
+make -j$(nproc) >/dev/null
 log_success "llama.cpp built successfully."
 
 # ========== CREATE SCRIPT MANAGER ==========
@@ -118,6 +119,7 @@ echo "[SCRIPT MANAGER] Handling script generation: $PROMPT"
 # Add logic here
 EOF
 chmod +x "$SCRIPT_MANAGER"
+log_success "Script manager created."
 
 # ========== CREATE WRAPPER ==========
 log_info "Creating AI CLI wrapper script ..."
@@ -128,7 +130,7 @@ LLAMA_BIN="$BUILD_DIR/bin/llama-simple-chat"
 MODEL_PATH="$MODEL_DIR/$MODEL_FILE"
 SCRIPT_MANAGER="$SCRIPT_MANAGER"
 PROMPT="\$*"
-echo "Running: \$LLAMA_BIN -m \"\$MODEL_PATH\" -p \"\$PROMPT\""
+echo "Running: \$LLAMA_BIN -m \"\\$MODEL_PATH\" -p \"\$PROMPT\""
 if echo "\$PROMPT" | grep -Eiq "^(write|create|generate|make).*(script|program)"; then
     echo "[AGENT MODE] Delegating to script manager ..."
     bash "\$SCRIPT_MANAGER" "\$PROMPT"
@@ -137,6 +139,6 @@ fi
 exec "\$LLAMA_BIN" -m "\$MODEL_PATH" -p "\$PROMPT"
 EOF
 sudo chmod +x "$AI_WRAPPER"
-log_success "AI CLI wrapper script created at: $AI_WRAPPER"
+log_success "AI CLI wrapper created at: $AI_WRAPPER"
 
-log_launch "Installation complete! Launch with: ai \"Your prompt here\""
+log_launch "🎉 Installation complete! Launch with: ai \"Your prompt here\""
