@@ -1,138 +1,123 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-### --- FUNCTIONS --- ###
-function info() { echo -e "[INFO] $1"; }
-function warn() { echo -e "[WARN] $1" >&2; }
-function error_exit() { echo -e "[ERROR] $1" >&2; exit 1; }
-
-### --- CONFIG --- ###
+# Constants
 INSTALL_DIR="$HOME/.ai_cli_offline"
-VENV_DIR="$INSTALL_DIR/venv"
-BIN_DIR="$INSTALL_DIR/llama.cpp/build/bin"
-SCRIPT_MANAGER="$INSTALL_DIR/script_manager.sh"
-WRAPPER_PATH="/usr/local/bin/ai"
+SCRIPT_NAME="ai-offline.sh"
+TMP_SCRIPT="${INSTALL_DIR}/${SCRIPT_NAME}.tmp"
+REMOTE_SCRIPT_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/ai-offline.sh"
+LLAMA_CPP_REPO="https://github.com/ggerganov/llama.cpp.git"
 MODEL_DIR="$INSTALL_DIR/models"
-MODEL_NAME="llama-2-7b-chat.Q4_K_M.gguf"
-MODEL_PATH="$MODEL_DIR/$MODEL_NAME"
-INSTALLER_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/ai-offline.sh"
-TMP_INSTALLER="/tmp/ai-offline.sh.tmp"
-LLAMA_REPO="https://github.com/ggerganov/llama.cpp"
-MODEL_PRIMARY="https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/$MODEL_NAME"
-MODEL_SECONDARY="https://huggingface.co/alternate/path/to/$MODEL_NAME"
+DEFAULT_MODEL_URL="https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q4_K_M.gguf"
+ALTERNATE_MODEL_URL="https://huggingface.co/NousResearch/Nous-Hermes-Llama2-GGUF/resolve/main/nous-hermes-llama2-7b.Q4_K_M.gguf"
+REQUIRED_SPACE_MB=10240
 
-FEATURE_BASE_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/feature"
-MAX_FEATURES=99
+# Ensure install dir
+mkdir -p "$INSTALL_DIR"
 
-### --- SELF UPDATE CHECK --- ###
-info "Checking for installer updates ..."
-if curl -fsSL "$INSTALLER_URL" -o "$TMP_INSTALLER"; then
-    if ! cmp -s "$0" "$TMP_INSTALLER"; then
-        info "New version of ai-offline.sh found. Applying update."
-        chmod +x "$TMP_INSTALLER"
-        mv "$TMP_INSTALLER" "$0"
-        info "Updated successfully. Please re-run the script."
-        exit 0
-    else
-        rm -f "$TMP_INSTALLER"
-    fi
-else
-    warn "Failed to download installer update. Continuing ..."
+# Check disk space
+AVAILABLE_SPACE_MB=$(df "$INSTALL_DIR" | awk 'NR==2 {print int($4/1024)}')
+if (( AVAILABLE_SPACE_MB < REQUIRED_SPACE_MB )); then
+  echo "[ERROR] Not enough disk space. Required: ${REQUIRED_SPACE_MB}MB, Available: ${AVAILABLE_SPACE_MB}MB"
+  exit 1
 fi
 
-### --- CLEAN INSTALL --- ###
-info "Preparing installation at $INSTALL_DIR ..."
-rm -rf "$INSTALL_DIR"
-mkdir -p "$MODEL_DIR"
+# Self-update check
+echo "[INFO] Checking for installer updates ..."
+if curl -fsSL "$REMOTE_SCRIPT_URL" -o "$TMP_SCRIPT"; then
+  if ! diff -q "$0" "$TMP_SCRIPT" >/dev/null 2>&1; then
+    echo "[UPDATE] New version of $SCRIPT_NAME found. Applying update."
+    if mv "$TMP_SCRIPT" "$0" 2>/dev/null || sudo mv "$TMP_SCRIPT" "$0"; then
+      chmod +x "$0"
+      exec "$0" "$@"
+    else
+      echo "[ERROR] Failed to overwrite script. Manual update required."
+      exit 1
+    fi
+  else
+    rm -f "$TMP_SCRIPT"
+  fi
+else
+  echo "[WARN] Could not check for updates. Continuing with existing script."
+fi
 
-### --- DEPENDENCIES --- ###
-info "Installing required packages ..."
-sudo apt update -y && sudo apt install -y build-essential cmake curl git python3 python3-venv python3-pip
+# Dependencies
+sudo apt-get update && sudo apt-get install -y git cmake build-essential curl python3 python3-venv
 
-### --- PYTHON VENV --- ###
-info "Setting up Python virtual environment ..."
-python3 -m venv "$VENV_DIR"
-source "$VENV_DIR/bin/activate"
+# Clone llama.cpp
+echo "[INFO] Cloning llama.cpp ..."
+rm -rf "$INSTALL_DIR/llama.cpp"
+git clone "$LLAMA_CPP_REPO" "$INSTALL_DIR/llama.cpp"
 
-info "Upgrading pip inside venv ..."
-pip install --upgrade pip setuptools wheel || warn "Pip upgrade failed."
-
-info "Installing Python AI packages ..."
-pip install torch transformers accelerate bitsandbytes huggingface-hub \
-            sentence-transformers chromadb langchain tiktoken crewai \
-            autogen-core wikipedia beautifulsoup4 duckduckgo-search pipx \
-            || error_exit "Python package installation failed."
-
-### --- CLONE & BUILD LLAMA.CPP --- ###
-info "Cloning llama.cpp repo ..."
-git clone "$LLAMA_REPO" "$INSTALL_DIR/llama.cpp"
-
-info "Building llama.cpp ..."
+# Build llama.cpp
 mkdir -p "$INSTALL_DIR/llama.cpp/build"
 cd "$INSTALL_DIR/llama.cpp/build"
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 
-### --- DOWNLOAD MODEL --- ###
-info "Downloading model: $MODEL_NAME"
-if ! curl -fLo "$MODEL_PATH" "$MODEL_PRIMARY"; then
-    warn "Primary model download failed. Trying fallback ..."
-    curl -fLo "$MODEL_PATH" "$MODEL_SECONDARY" || error_exit "Model download failed from all sources."
+# Model selection
+echo "[PROMPT] Choose a model to install:"
+echo "1. LLaMA 2 7B Chat (default)"
+echo "2. Nous Hermes LLaMA2 7B"
+echo "3. Mistral-7B-Instruct (Experimental)"
+read -rp "Enter your choice [1-3]: " MODEL_CHOICE
+MODEL_PATH="$MODEL_DIR/llama-2-7b-chat.Q4_K_M.gguf"
+MODEL_URL="$DEFAULT_MODEL_URL"
+
+case "$MODEL_CHOICE" in
+  2)
+    MODEL_PATH="$MODEL_DIR/nous-hermes-llama2-7b.Q4_K_M.gguf"
+    MODEL_URL="$ALTERNATE_MODEL_URL"
+    ;;
+  3)
+    MODEL_PATH="$MODEL_DIR/mistral-7b-instruct-v0.1.Q4_K_M.gguf"
+    MODEL_URL="https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.1-GGUF/resolve/main/mistral-7b-instruct-v0.1.Q4_K_M.gguf"
+    ;;
+esac
+
+mkdir -p "$MODEL_DIR"
+echo "[INFO] Downloading model ..."
+if ! curl -L "$MODEL_URL" -o "$MODEL_PATH"; then
+  echo "[WARN] Primary model download failed. Trying alternative mirror ..."
+  if ! curl -L "$ALTERNATE_MODEL_URL" -o "$MODEL_PATH"; then
+    echo "[ERROR] Failed to download model. Aborting."
+    exit 1
+  fi
 fi
 
-### --- CREATE SCRIPT MANAGER --- ###
-cat << 'EOF' > "$SCRIPT_MANAGER"
+# Create script manager stub
+cat << 'EOF' > "$INSTALL_DIR/script_manager.sh"
 #!/usr/bin/env bash
-set -euo pipefail
 PROMPT="$*"
-echo "[QC AGENT] Reviewing draft ..."
-echo "[QC AGENT] No errors detected."
-echo "[HANDOVER AGENT] Script saved at: \$HOME/.ai_cli_offline/scripts/script_from_prompt.sh"
+echo "[SCRIPT MANAGER] Received: $PROMPT"
+# Placeholder: script creation logic
 EOF
-chmod +x "$SCRIPT_MANAGER"
+chmod +x "$INSTALL_DIR/script_manager.sh"
 
-### --- CREATE AI WRAPPER --- ###
-info "Creating AI CLI wrapper at $WRAPPER_PATH"
-cat << EOF | sudo tee "$WRAPPER_PATH" > /dev/null
+# Create AI CLI wrapper
+cat << EOF > "/usr/local/bin/ai"
 #!/usr/bin/env bash
 set -euo pipefail
-LLAMA_BIN="$BIN_DIR/llama-simple-chat"
-MODEL="$MODEL_PATH"
-SCRIPT_MANAGER="$SCRIPT_MANAGER"
+LLAMA_BIN="$INSTALL_DIR/llama.cpp/build/bin/llama-simple-chat"
+MODEL_PATH="$MODEL_PATH"
+SCRIPT_MANAGER="$INSTALL_DIR/script_manager.sh"
+
 PROMPT="\$*"
 
 if [[ ! -x "\$LLAMA_BIN" ]]; then
-    echo "[ERROR] llama-simple-chat not found at \$LLAMA_BIN" >&2
-    exit 1
+  echo "[ERROR] Llama binary not found at \$LLAMA_BIN"
+  exit 1
 fi
 
 if echo "\$PROMPT" | grep -Eiq "^(write|create|generate|make).*(script|program)"; then
-    echo "[AGENT MODE] Delegating to script manager."
-    bash "\$SCRIPT_MANAGER" "\$PROMPT"
-    exit 0
+  echo "[AGENT MODE] Delegating to script manager."
+  bash "\$SCRIPT_MANAGER" "\$PROMPT"
+  exit 0
 fi
 
-exec "\$LLAMA_BIN" -m "\$MODEL" -p "\$PROMPT"
+echo "Running: \$LLAMA_BIN -m \"\$MODEL_PATH\" -p \"\$PROMPT\""
+exec "\$LLAMA_BIN" -m "\$MODEL_PATH" -p "\$PROMPT"
 EOF
-sudo chmod +x "$WRAPPER_PATH"
 
-### --- APPLY FEATURE UPDATES --- ###
-info "Applying modular AI CLI features..."
-for i in $(seq 1 "$MAX_FEATURES"); do
-    FEATURE_URL="${FEATURE_BASE_URL}${i}.sh"
-    FEATURE_SCRIPT="/tmp/feature${i}.sh"
-
-    if curl --silent --head --fail "$FEATURE_URL" > /dev/null; then
-        info "Fetching and applying feature ${i}..."
-        curl -fsSL "$FEATURE_URL" -o "$FEATURE_SCRIPT" || { warn "Failed to download feature${i}.sh"; continue; }
-        chmod +x "$FEATURE_SCRIPT"
-        bash "$FEATURE_SCRIPT" || warn "Feature${i}.sh execution failed."
-    else
-        info "No more features found after feature${i}.sh."
-        break
-    fi
-done
-
-### --- DONE --- ###
-info "Installation complete!"
-echo "You can now run AI CLI with: ai \"Your prompt here\""
+chmod +x "/usr/local/bin/ai"
+echo "[INFO] Installation complete! Run AI with: ai \"Your prompt here\""
