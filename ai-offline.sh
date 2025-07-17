@@ -145,21 +145,26 @@ log_success "Script manager created."
 
 # ========== CREATE WRAPPER ==========
 log_info "Creating AI CLI wrapper script ..."
+RESOLVED_LLAMA_BIN="$BUILD_DIR/bin/llama-simple-chat"
+RESOLVED_MODEL_PATH="$MODEL_DIR/$MODEL_FILE"
+RESOLVED_SCRIPT_MANAGER="$SCRIPT_MANAGER"
+
 cat << EOF | sudo tee "$AI_WRAPPER" >/dev/null
 #!/usr/bin/env bash
 set -euo pipefail
-LLAMA_BIN="$BUILD_DIR/bin/llama-simple-chat"
-MODEL_PATH="$MODEL_DIR/$MODEL_FILE"
-SCRIPT_MANAGER="$SCRIPT_MANAGER"
+LLAMA_BIN="$RESOLVED_LLAMA_BIN"
+MODEL_PATH="$RESOLVED_MODEL_PATH"
+SCRIPT_MANAGER="$RESOLVED_SCRIPT_MANAGER"
 PROMPT="\$*"
-echo "🧠 Running: \"\\$LLAMA_BIN\" -m \"\\$MODEL_PATH\" -p \"\\$PROMPT\""
-if echo "\\$PROMPT" | grep -Eiq "^(write|create|generate|make).*(script|program)"; then
-    echo "🤖 [AGENT MODE] Delegating to script manager ..."
-    exec "\\$SCRIPT_MANAGER" "\\$PROMPT"
+echo "Running: \$LLAMA_BIN -m \"\$MODEL_PATH\" -p \"\$PROMPT\""
+if echo "\$PROMPT" | grep -Eiq "^(write|create|generate|make).*(script|program)"; then
+    echo "[AGENT MODE] Delegating to script manager ..."
+    bash "\$SCRIPT_MANAGER" "\$PROMPT"
+    exit 0
 fi
-exec "\\$LLAMA_BIN" -m "\\$MODEL_PATH" -p "\\$PROMPT"
+exec "\$LLAMA_BIN" -m "\$MODEL_PATH" -p "\$PROMPT"
 EOF
+
 sudo chmod +x "$AI_WRAPPER"
 log_success "AI CLI wrapper created at: $AI_WRAPPER"
 
-log_launch "🎉 Installation complete! Launch with: ai \"Your prompt here\""
