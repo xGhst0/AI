@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-echo "Script v2.1"
+
 # ========== CONFIGURATION ==========
 INSTALL_DIR="$HOME/.ai_cli_offline"
 LLAMA_DIR="$INSTALL_DIR/llama.cpp"
@@ -111,15 +111,18 @@ fi
 
 # ========== CLONE AND BUILD LLAMA.CPP ==========
 if [[ -d "$LLAMA_DIR/.git" ]]; then
-    log_warn "llama.cpp already cloned. Skipping clone."
+    log_warn "llama.cpp already exists. Skipping clone."
 else
     log_info "Cloning llama.cpp repository ..."
     git clone --depth 1 https://github.com/ggerganov/llama.cpp "$LLAMA_DIR" >/dev/null
     log_success "llama.cpp cloned."
 fi
-log_info "Building llama.cpp ..."
+
+log_info "Cleaning build directory if present ..."
+rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
+log_info "Building llama.cpp ..."
 cmake .. -DCMAKE_BUILD_TYPE=Release >/dev/null
 make -j$(nproc) >/dev/null
 log_success "llama.cpp built successfully."
