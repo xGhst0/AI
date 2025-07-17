@@ -2,12 +2,10 @@
 set -euo pipefail
 
 ### === VERSION === ###
-echo 'Script v2.8'
+echo 'Script v2.9'
 
 # ========== CONFIGURATION ==========
 INSTALL_DIR="$HOME/.ai_cli_offline"
-LLAMA_DIR="$INSTALL_DIR/llama.cpp"
-BUILD_DIR="$LLAMA_DIR/build"
 MODEL_DIR="$INSTALL_DIR/models"
 SCRIPT_MANAGER="$INSTALL_DIR/script_manager.sh"
 AI_WRAPPER="/usr/local/bin/ai"
@@ -89,20 +87,11 @@ case "$MODEL_CHOICE" in
         ;;
 esac
 
-# ========== PREPARE DIRECTORIES ==========
-log_info "Preparing installation directories ..."
-mkdir -p "$MODEL_DIR"
-
-if [[ -d "$LLAMA_DIR/.git" ]]; then
-    log_warn "llama.cpp already cloned. Skipping clone step."
-else
-    if [[ -d "$LLAMA_DIR" ]]; then
-        log_warn "llama.cpp exists but appears incomplete. Backing up."
-        mv "$LLAMA_DIR" "$LLAMA_DIR.bak.$(date +%s)"
-    fi
-    log_info "Cloning llama.cpp repository ..."
-    git clone --depth 1 https://github.com/ggerganov/llama.cpp "$LLAMA_DIR" >/dev/null
-    log_success "llama.cpp cloned."
+# ========== CLEAN OLD LLAMA.CPP ==========
+if [[ -d "$HOME/.ai_cli_offline/llama.cpp" ]]; then
+  log_warn "Removing existing llama.cpp ..."
+  rm -rf "$HOME/.ai_cli_offline/llama.cpp"
+  log_success "llama.cpp removed."
 fi
 
 # ========== SYSTEM DEPENDENCIES ==========
@@ -110,7 +99,16 @@ log_info "Installing system dependencies ..."
 sudo apt-get update -qq >/dev/null && sudo apt-get install -y -qq cmake build-essential curl python3-venv python3-dev git >/dev/null
 log_success "System dependencies installed."
 
+# ========== INSTALL GPT4ALL CHAT BACKEND ==========
+BACKEND_DIR="$INSTALL_DIR/gpt4all"
+git clone --depth 1 https://github.com/nomic-ai/gpt4all.git "$BACKEND_DIR"
+cd "$BACKEND_DIR"
+mkdir -p build && cd build
+cmake .. >/dev/null && make -j$(nproc) >/dev/null
+log_success "gpt4all built."
+
 # ========== DOWNLOAD MODEL ==========
+mkdir -p "$MODEL_DIR"
 if [[ -f "$MODEL_DIR/$MODEL_FILE" ]]; then
     log_warn "Model already exists at $MODEL_DIR/$MODEL_FILE. Skipping download."
 else
@@ -125,39 +123,34 @@ else
     log_success "Model downloaded to: $MODEL_DIR/$MODEL_FILE"
 fi
 
-# ========== BUILD LLAMA.CPP ==========
-log_info "Cleaning build directory if present ..."
-rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR"
-cd "$BUILD_DIR"
-log_info "🛠️ Building llama.cpp (with curl disabled) ..."
-cmake .. -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF >/dev/null
-make -j$(nproc) >/dev/null
-log_success "llama.cpp built successfully."
-
 # ========== CREATE SCRIPT MANAGER ==========
 log_info "Creating script manager agent ..."
-cat << 'EOF' > "$SCRIPT_MANAGER"
+cat << 'EOF_SCRIPT' > "$SCRIPT_MANAGER"
 #!/usr/bin/env bash
 PROMPT="$*"
 echo "[SCRIPT MANAGER] Handling script generation: $PROMPT"
 # Add logic here to handle prompt parsing
-EOF
+EOF_SCRIPT
 chmod +x "$SCRIPT_MANAGER"
 log_success "Script manager created."
 
 # ========== CREATE AI WRAPPER ==========
 log_info "Creating AI CLI wrapper script ..."
-RESOLVED_LLAMA_BIN="$BUILD_DIR/bin/llama-simple-chat"
-RESOLVED_MODEL_PATH="$MODEL_DIR/$MODEL_FILE"
+RESOLVED_BIN="$BACKEND_DIR/build/bin/gpt4all"
+RESOLVED_MODEL="$MODEL_DIR/$MODEL_FILE"
+RESOLVED_LOG="$LOG_FILE"
 RESOLVED_SCRIPT_MANAGER="$SCRIPT_MANAGER"
-cat << EOF | sudo tee "$AI_WRAPPER" >/dev/null
+
+cat << EOF_WRAPPER | sudo tee "$AI_WRAPPER" >/dev/null
 #!/usr/bin/env bash
 set -euo pipefail
-LLAMA_BIN="$RESOLVED_LLAMA_BIN"
-MODEL_PATH="$RESOLVED_MODEL_PATH"
+MODEL_PATH="$RESOLVED_MODEL"
+BINARY="$RESOLVED_BIN"
 SCRIPT_MANAGER="$RESOLVED_SCRIPT_MANAGER"
-LOG_FILE="$LOG_FILE"
+LOG_FILE="$RESOLVED_LOG"
+
+mkdir -p \$(dirname "\$LOG_FILE")
+touch "\$LOG_FILE"
 
 PROMPT="\$*"
 echo "\$PROMPT" >> "\$LOG_FILE"
@@ -169,8 +162,8 @@ if echo "\$LAST_LINE" | grep -Eiq "^(write|create|generate|make).*(script|progra
     exit 0
 fi
 
-exec "\$LLAMA_BIN" -m "\$MODEL_PATH" -p "\$LAST_LINE"
-EOF
+exec "\$BINARY" --model-path "\$MODEL_PATH" --prompt "\$LAST_LINE"
+EOF_WRAPPER
 
 sudo chmod +x "$AI_WRAPPER"
 log_success "AI CLI wrapper created at: $AI_WRAPPER"
@@ -178,8 +171,8 @@ log_success "AI CLI wrapper created at: $AI_WRAPPER"
 # ========== SELF-TEST ==========
 log_info "Verifying wrapper execution ..."
 if ! "$AI_WRAPPER" --help >/dev/null 2>&1; then
-  log_error "Wrapper test failed. Please verify that llama-simple-chat runs manually."
-  echo "Try running: \"$RESOLVED_LLAMA_BIN -m $RESOLVED_MODEL_PATH -p 'Hello'\" manually to debug."
+  log_error "Wrapper test failed. Please verify that gpt4all runs manually."
+  echo "Try running: \"$RESOLVED_BIN --model-path $RESOLVED_MODEL --prompt 'Hello'\" manually to debug."
   exit 1
 fi
 log_success "Wrapper test completed. Installation successful."
