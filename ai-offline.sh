@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-echo 'Script v2.2, Running Now...'
+
 # ========== CONFIGURATION ==========
 INSTALL_DIR="$HOME/.ai_cli_offline"
 LLAMA_DIR="$INSTALL_DIR/llama.cpp"
@@ -89,10 +89,17 @@ esac
 log_info "Preparing installation directories ..."
 mkdir -p "$MODEL_DIR"
 
-# Clean and reset llama.cpp directory
-if [[ -d "$LLAMA_DIR" ]]; then
-    log_warn "Removing existing llama.cpp directory ..."
-    rm -rf "$LLAMA_DIR"
+# Clean llama.cpp only if safe to do so
+if [[ -d "$LLAMA_DIR/.git" ]]; then
+    log_warn "llama.cpp already cloned. Skipping clone step."
+else
+    if [[ -d "$LLAMA_DIR" ]]; then
+        log_warn "llama.cpp exists but appears incomplete. Backing up."
+        mv "$LLAMA_DIR" "$LLAMA_DIR.bak.$(date +%s)"
+    fi
+    log_info "Cloning llama.cpp repository ..."
+    git clone --depth 1 https://github.com/ggerganov/llama.cpp "$LLAMA_DIR" >/dev/null
+    log_success "llama.cpp cloned."
 fi
 
 # ========== SYSTEM DEPENDENCIES ==========
@@ -115,17 +122,13 @@ else
     log_success "Model downloaded to: $MODEL_DIR/$MODEL_FILE"
 fi
 
-# ========== CLONE AND BUILD LLAMA.CPP ==========
-log_info "Cloning llama.cpp repository ..."
-git clone --depth 1 https://github.com/ggerganov/llama.cpp "$LLAMA_DIR" >/dev/null
-log_success "llama.cpp cloned."
-
+# ========== BUILD LLAMA.CPP ==========
 log_info "Cleaning build directory if present ..."
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
-log_info "Building llama.cpp ..."
-cmake .. -DCMAKE_BUILD_TYPE=Release >/dev/null
+log_info "Building llama.cpp (with curl disabled) ..."
+cmake .. -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF >/dev/null
 make -j$(nproc) >/dev/null
 log_success "llama.cpp built successfully."
 
