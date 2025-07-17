@@ -1,11 +1,7 @@
 #!/bin/bash
 
 # --- Configuration ---
-# Base URL for GitHub repository (replace with your actual base URL)
-# The image shows "https://github.com/Xghst0/AI/blob/main/install.sh"
-# and "https://github.com/Xghst0/AI/blob/m" for sub-scripts.
-# Assuming 'main' is the branch for install.sh and 'm' for others.
-# Adjust BASE_URL_MAIN and BASE_URL_SUB accordingly.
+
 BASE_URL_MAIN="https://github.com/Xghst0/AI/blob/main"
 BASE_URL_SUB="https://github.com/Xghst0/AI/blob/main"
 
@@ -20,7 +16,8 @@ WRAPPER_INSTALL_DIR="./wrapper_install"
 FEATURE_INSTALL_DIR="./feature_install"
 
 # Log file configuration
-LOG_FILE="./install.log"
+# Changed to user's home directory to avoid permission issues when running as non-root.
+LOG_FILE="$HOME/install.log"
 
 # --- Script Version (for self-update) ---
 # This version string is embedded in the script for easy extraction and comparison.
@@ -48,6 +45,11 @@ trap log_error ERR
 
 # Redirect all stdout and stderr to the log file, and also to console via tee
 # This ensures all output is captured for auditing and debugging.
+# Ensure the log file can be created/written to before redirection.
+mkdir -p "$(dirname "$LOG_FILE")" # Ensure the directory for the log file exists
+touch "$LOG_FILE" # Create the log file if it doesn't exist and set initial permissions
+chmod 644 "$LOG_FILE" # Ensure appropriate permissions for the log file
+
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 log_message "INFO" "--- Script Started: install.sh (Version: $SCRIPT_VERSION) ---"
@@ -57,7 +59,8 @@ log_message "INFO" "--- Script Started: install.sh (Version: $SCRIPT_VERSION) --
 check_command() {
     local cmd="$1"
     log_message "INFO" "Checking for required command: $cmd..."
-    if! command -v "$cmd" &> /dev/null; then
+    # Fix: Added space between 'if' and '!'
+    if ! command -v "$cmd" &> /dev/null; then
         log_message "FATAL" "Error: '$cmd' is not installed. Please install it to proceed."
         exit 1
     fi
@@ -138,7 +141,7 @@ perform_self_update() {
         return 0
     fi
 
-    if [! -f "$temp_remote_script" ]; then
+    if [ ! -f "$temp_remote_script" ]; then # Fix: Added space between '!' and '-f'
         log_message "WARN" "Failed to download remote install.sh for update check."
         return 0
     fi
@@ -189,8 +192,9 @@ perform_self_update
 # Defines an associative array for sub-scripts: [script_name]="URL;Local_Path"
 declare -A SUB_SCRIPTS
 SUB_SCRIPTS["Model_Install.sh"]="${MODEL_INSTALL_URL};${MODEL_INSTALL_DIR}/Model_Install.sh"
-SUB_SCRIPTS="${WRAPPER_INSTALL_URL};${WRAPPER_INSTALL_DIR}/Wrapper_Install.sh"
-SUB_SCRIPTS["Feature_Install.sh"]="${FEATURE_INSTALL_URL};${FEATURE_INSTALL_DIR}/Feature_Install.sh"
+# Fix: Corrected assignment for Wrapper_Install.sh
+SUB_SCRIPTS["Wrapper_Install.sh"]="${WRAPPER_INSTALL_URL};${WRAPPER_INSTALL_DIR}/Wrapper_Install.sh"
+SUB_SCRIPTS["Feature_Install.sh"]="${FEATURE_INSTALL_URL};${FEATURE_INSTALL_DIR}/Feature_INSTALL.sh"
 
 install_sub_script() {
     local script_name="$1"
