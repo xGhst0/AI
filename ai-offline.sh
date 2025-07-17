@@ -1,131 +1,119 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-### === VERSION === ###
-echo 'Script v5.1'
+# === AI-CLI OFFLINE INSTALLER & WRAPPER REDESIGN v1.0 ===
+# Now uses a Python-based wrapper for robust prompt handling and extensibility.
 
-# ========== CONFIGURATION ==========
+### CONFIGURATION ###
 INSTALL_DIR="$HOME/.ai_cli_offline"
-INSTALLER="$INSTALL_DIR/ai-offline.sh"
 VENV_DIR="$INSTALL_DIR/venv"
 MODEL_DIR="$INSTALL_DIR/models"
-SCRIPT_MANAGER="$INSTALL_DIR/script_manager.sh"
+SCRIPT_MANAGER="$INSTALL_DIR/script_manager.py"
 USER_BIN="$HOME/.local/bin"
-AI_WRAPPER="$USER_BIN/ai"
-DISK_REQUIRED_GB=10
-LOG_FILE="$INSTALL_DIR/conversation.txt"
-BACKUP_DIR="$INSTALL_DIR/backups"
-INSTALLER_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/ai-offline.sh"
-TMP_UPDATE="$INSTALL_DIR/ai-offline.sh.tmp"
+WRAPPER="$USER_BIN/ai"
+LOG_FILE="$INSTALL_DIR/conversation.json"
+UPDATE_URL="https://raw.githubusercontent.com/xGhst0/AI/main/ai-offline.sh"
 
-# ========== EMOJI CONSTANTS ==========
-EMOJI_INFO="[\033[1;34mℹ️\033[0m]"
-EMOJI_WARN="[\033[1;33m⚠️\033[0m]"
-EMOJI_SUCCESS="[\033[1;32m✅\033[0m]"
-EMOJI_ERROR="[\033[1;31m❌\033[0m]"
+# Ensure base directories
+mkdir -p "$INSTALL_DIR" "$MODEL_DIR" "$USER_BIN"
+touch "$INSTALLER" "$LOG_FILE"
 
-# ========== LOG FUNCTIONS ==========
-log_info()    { echo -e "${EMOJI_INFO} $1"; }
-log_warn()    { echo -e "${EMOJI_WARN} $1"; }
-log_success(){ echo -e "${EMOJI_SUCCESS} $1"; }
-log_error(){ echo -e "${EMOJI_ERROR} $1"; exit 1; }
+# === Logging Helpers ===
+info(){ printf "\e[34m[INFO]\e[0m %s\n" "$1"; }
+warn(){ printf "\e[33m[WARN]\e[0m %s\n" "$1"; }
+error(){ printf "\e[31m[ERROR]\e[0m %s\n" "$1"; exit 1; }
 
-# ========== HANDLE --update ==========
+# === Self-Update ===
 if [[ "${1:-}" == "--update" ]]; then
-  log_info "Checking for updates..."
-  mkdir -p "$INSTALL_DIR" "$BACKUP_DIR"
-  if curl -fsSL "$INSTALLER_URL" -o "$TMP_UPDATE"; then
-    if ! cmp -s "$INSTALLER" "$TMP_UPDATE"; then
-      mkdir -p "$BACKUP_DIR"
-      cp "$INSTALLER" "$BACKUP_DIR/installer_backup_$(date +%Y%m%d%H%M%S).sh"
-      mv "$TMP_UPDATE" "$INSTALLER" && chmod +x "$INSTALLER"
-      log_success "Installer updated. Run without --update."
-    else
-      log_info "Installer already up to date"
-      rm -f "$TMP_UPDATE"
-    fi
-  else
-    log_warn "Could not fetch update"
-  fi
+  info "Checking for updates..."
+  tmp=$(mktemp)
+  curl -fsSL "$UPDATE_URL" -o "$tmp" || error "Cannot reach update server"
+  cmp -s "$0" "$tmp" && { info "Already latest"; rm "$tmp"; exit 0; }
+  cp "$0" "$INSTALL_DIR/backup_installer_$(date +%s).sh"
+  mv "$tmp" "$0" && chmod +x "$0"
+  info "Installer updated. Rerun without --update."
   exit 0
 fi
 
-# ========== PRECHECKS ==========
-mkdir -p "$INSTALL_DIR" "$MODEL_DIR" "$USER_BIN" "$BACKUP_DIR"
-touch "$LOG_FILE" "$INSTALLER"
-FREE_GB=$(df "$HOME" | awk 'NR==2 {print int($4/1024/1024)}')
-(( FREE_GB < DISK_REQUIRED_GB )) && log_error "Require ${DISK_REQUIRED_GB}GB free, have ${FREE_GB}GB"
-log_success "Disk OK: ${FREE_GB}GB free"
-if ! echo "$PATH" | grep -q "$USER_BIN"; then
-  log_warn "Add '$USER_BIN' to PATH"
+# === Disk Check ===
+free_gb=$(df "$HOME" --output=avail -k | tail -1 | awk '{print int($1/1024/1024)}')
+(( free_gb < 10 )) && error "Need >=10GB, have ${free_gb}GB"
+info "Disk OK: ${free_gb}GB"
+
+# === Virtualenv & Python Dependencies ===
+if [[ ! -d "$VENV_DIR" ]]; then
+  info "Creating virtualenv..."
+  python3 -m venv "$VENV_DIR" || error "venv failed"
 fi
-
-# ========== CLEAN OLD BACKENDS ==========
-for dir in gpt4all gpt4all.cpp llama.cpp; do
-  inst="${INSTALL_DIR}/${dir}"
-  if [[ -d "$inst" ]]; then
-    log_warn "Removing old backend: $dir"
-    mv "$inst" "$BACKUP_DIR/${dir}_$(date +%s)"
-  fi
-done
-rm -f "$AI_WRAPPER"
-log_info "Old wrapper removed"
-
-# ========== VENV SETUP ==========
-log_info "Creating virtual environment..."
-python3 -m venv "$VENV_DIR"
+# Activate
+# shellcheck disable=SC1090
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip >/dev/null
-pip install --quiet llama-cpp-python llm >/dev/null
-log_success "Venv ready"
+echo "{'installed':[]}" > "$LOG_FILE"  # initialize JSON log
+pip install --quiet llama-cpp-python rich >/dev/null || error "pip install failed"
+info "Python env ready"
 
-# ========== MODEL SELECTION ==========
-log_info "Select model:"
-PS3="Choice [1-3]: "
-select opt in "LLaMA 2 7B Chat" "Mistral 7B Instruct" "Zephyr 7B"; do
-  case \$REPLY in
-    1) MODEL_FILE=llama-2-7b-chat.Q4_K_M.gguf; MODEL_URL="https://huggingface.co/TheBloke/LLaMA-2-7B-Chat-GGUF/resolve/main/$MODEL_FILE"; break;;
-    2) MODEL_FILE=mistral-7b-instruct-v0.1.Q4_K_M.gguf; MODEL_URL="https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.1-GGUF/resolve/main/$MODEL_FILE"; break;;
-    3) MODEL_FILE=zephyr-7b-beta.Q4_K_M.gguf; MODEL_URL="https://huggingface.co/HuggingFaceH4/zephyr-7b-beta-GGUF/resolve/main/$MODEL_FILE"; break;;
-    *) log_warn "Invalid selection";;
-  esac
-done
-
-# ========== MODEL DOWNLOAD ==========
-if [[ ! -f "$MODEL_DIR/$MODEL_FILE" ]]; then
-  log_info "Downloading $MODEL_FILE..."
-  curl -fsSL "$MODEL_URL" -o "$MODEL_DIR/$MODEL_FILE" || wget -q "$MODEL_URL" -O "$MODEL_DIR/$MODEL_FILE" || log_error "Failed download"
-  log_success "Model saved to $MODEL_DIR/$MODEL_FILE"
-else
-  log_info "Model exists, skipping"
-fi
-
-# ========== SCRIPT MANAGER ==========
+# === Python-Based Interactive Wrapper ===
 cat > "$SCRIPT_MANAGER" << 'EOF'
-#!/usr/bin/env bash
-PROMPT="$*"
-echo "[SCRIPT MANAGER] \$PROMPT"
-# custom logic
+#!/usr/bin/env python3
+import json, os, sys
+from llama_cpp import Llama
+from rich.console import Console
+
+# Paths
+home = os.path.expanduser('~')
+install = os.path.join(home, '.ai_cli_offline')
+model_dir = os.path.join(install, 'models')
+log_file = os.path.join(install, 'conversation.json')
+
+console = Console()
+# Load or init log
+if os.path.exists(log_file):
+    with open(log_file, 'r') as f: conversation = json.load(f)
+else:
+    conversation = {'history': []}
+
+# Handle update flag
+if len(sys.argv) > 1 and sys.argv[1] == '--update':
+    os.execvp(os.path.join(install, 'ai-offline.sh'), ['ai-offline.sh', '--update'])
+
+# Collect prompt
+prompt = ' '.join(sys.argv[1:])
+conversation['history'].append({'role': 'user', 'content': prompt})
+
+# Determine model file
+models = [f for f in os.listdir(model_dir) if f.endswith('.gguf')]
+if not models:
+    console.print('[red]No model found in ~/.ai_cli_offline/models[/]')
+    sys.exit(1)
+model_path = os.path.join(model_dir, models[0])
+
+# Instantiate Llama
+llm = Llama(model_path=model_path)
+# Build full context
+context = '\n'.join([f"{msg['role']}: {msg['content']}" for msg in conversation['history']])
+# Generate
+res = llm(context, max_tokens=128, stop=['user:', 'assistant:'])
+answer = res['choices'][0]['text'].strip()
+
+# Append and print
+conversation['history'].append({'role': 'assistant', 'content': answer})
+with open(log_file, 'w') as f: json.dump(conversation, f, indent=2)
+console.print(f"[bold green]AI:[/] {answer}")
 EOF
 chmod +x "$SCRIPT_MANAGER"
-log_success "Script manager ready"
+info "Python wrapper created at $SCRIPT_MANAGER"
 
-# ========== WRAPPER CREATION ==========
-cat > "$AI_WRAPPER" << EOF
+# === Install CLI Shim ===
+cat > "$WRAPPER" << 'EOF'
 #!/usr/bin/env bash
-set -euo pipefail
-source "$VENV_DIR/bin/activate"
-PROMPT="\$*"
-echo "\$PROMPT" >> "$LOG_FILE"
-LAST=\$(tail -n1 "$LOG_FILE")
-case "\$LAST" in
-  --update) exec "$INSTALLER" --update;;
-  write*|create*|generate*|make*) bash "$SCRIPT_MANAGER" "\$LAST";;
-  *) llm --model-path "$MODEL_DIR/$MODEL_FILE" "\$LAST";;
-esac
+# shim to Python wrapper
+VENV="$VENV_DIR/bin/activate"
+# shellcheck disable=SC1090
+source "$VENV"
+exec "$SCRIPT_MANAGER" "$@"
 EOF
-chmod +x "$AI_WRAPPER"
-log_success "Wrapper installed at $AI_WRAPPER"
+chmod +x "$WRAPPER"
+info "CLI installed as '$WRAPPER'"
 
-log_success "Installation v5.1 complete. Use 'ai --update' and 'ai "Your prompt"'"
-exit 0
+info "Installation v1.0 complete. Use 'ai Your prompt' to chat or 'ai --update' to update installer."
