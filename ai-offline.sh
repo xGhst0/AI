@@ -1,123 +1,142 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Constants
+# ========== CONFIGURATION ==========
 INSTALL_DIR="$HOME/.ai_cli_offline"
-SCRIPT_NAME="ai-offline.sh"
-TMP_SCRIPT="${INSTALL_DIR}/${SCRIPT_NAME}.tmp"
-REMOTE_SCRIPT_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/ai-offline.sh"
-LLAMA_CPP_REPO="https://github.com/ggerganov/llama.cpp.git"
+LLAMA_DIR="$INSTALL_DIR/llama.cpp"
+BUILD_DIR="$LLAMA_DIR/build"
 MODEL_DIR="$INSTALL_DIR/models"
-DEFAULT_MODEL_URL="https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q4_K_M.gguf"
-ALTERNATE_MODEL_URL="https://huggingface.co/NousResearch/Nous-Hermes-Llama2-GGUF/resolve/main/nous-hermes-llama2-7b.Q4_K_M.gguf"
-REQUIRED_SPACE_MB=10240
+SCRIPT_MANAGER="$INSTALL_DIR/script_manager.sh"
+AI_WRAPPER="/usr/local/bin/ai"
+INSTALLER_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/ai-offline.sh"
+TMP_UPDATE="$INSTALL_DIR/ai-offline.sh.tmp"
+DISK_REQUIRED_GB=10
 
-# Ensure install dir
+# ========== EMOJI CONSTANTS ==========
+EMOJI_INFO="[\033[1;34mℹ️\033[0m]"
+EMOJI_WARN="[\033[1;33m⚠️\033[0m]"
+EMOJI_SUCCESS="[\033[1;32m✅\033[0m]"
+EMOJI_ERROR="[\033[1;31m❌\033[0m]"
+EMOJI_ROCKET="[🚀]"
+
+# ========== ECHO WRAPPER ==========
+log_info()    { echo -e "$EMOJI_INFO $1"; }
+log_warn()    { echo -e "$EMOJI_WARN $1"; }
+log_success() { echo -e "$EMOJI_SUCCESS $1"; }
+log_error()   { echo -e "$EMOJI_ERROR $1"; }
+log_launch()  { echo -e "$EMOJI_ROCKET $1"; }
+
+# ========== UPDATE CHECK ==========
+log_info "Checking for installer updates ..."
 mkdir -p "$INSTALL_DIR"
-
-# Check disk space
-AVAILABLE_SPACE_MB=$(df "$INSTALL_DIR" | awk 'NR==2 {print int($4/1024)}')
-if (( AVAILABLE_SPACE_MB < REQUIRED_SPACE_MB )); then
-  echo "[ERROR] Not enough disk space. Required: ${REQUIRED_SPACE_MB}MB, Available: ${AVAILABLE_SPACE_MB}MB"
-  exit 1
-fi
-
-# Self-update check
-echo "[INFO] Checking for installer updates ..."
-if curl -fsSL "$REMOTE_SCRIPT_URL" -o "$TMP_SCRIPT"; then
-  if ! diff -q "$0" "$TMP_SCRIPT" >/dev/null 2>&1; then
-    echo "[UPDATE] New version of $SCRIPT_NAME found. Applying update."
-    if mv "$TMP_SCRIPT" "$0" 2>/dev/null || sudo mv "$TMP_SCRIPT" "$0"; then
-      chmod +x "$0"
-      exec "$0" "$@"
+if curl -fsSL "$INSTALLER_URL" -o "$TMP_UPDATE"; then
+    if ! cmp -s "$0" "$TMP_UPDATE"; then
+        log_info "Update found! Applying update ..."
+        if mv "$TMP_UPDATE" "$0" 2>/dev/null || sudo mv "$TMP_UPDATE" "$0"; then
+            log_success "Installer updated. Please re-run the script."
+            exit 0
+        else
+            log_error "Failed to apply update. Check permissions."
+            exit 1
+        fi
     else
-      echo "[ERROR] Failed to overwrite script. Manual update required."
-      exit 1
+        rm "$TMP_UPDATE"
+        log_info "Installer is up to date."
     fi
-  else
-    rm -f "$TMP_SCRIPT"
-  fi
 else
-  echo "[WARN] Could not check for updates. Continuing with existing script."
+    log_warn "Could not check for updates. Continuing ..."
 fi
 
-# Dependencies
-sudo apt-get update && sudo apt-get install -y git cmake build-essential curl python3 python3-venv
+# ========== DISK CHECK ==========
+log_info "Checking for at least ${DISK_REQUIRED_GB}GB of free space ..."
+FREE_GB=$(df "$HOME" | awk 'NR==2 {print int($4/1024/1024)}')
+if (( FREE_GB < DISK_REQUIRED_GB )); then
+    log_error "Not enough disk space. Required: ${DISK_REQUIRED_GB}GB, Available: ${FREE_GB}GB"
+    exit 1
+else
+    log_success "Sufficient disk space available: ${FREE_GB}GB"
+fi
 
-# Clone llama.cpp
-echo "[INFO] Cloning llama.cpp ..."
-rm -rf "$INSTALL_DIR/llama.cpp"
-git clone "$LLAMA_CPP_REPO" "$INSTALL_DIR/llama.cpp"
-
-# Build llama.cpp
-mkdir -p "$INSTALL_DIR/llama.cpp/build"
-cd "$INSTALL_DIR/llama.cpp/build"
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
-
-# Model selection
-echo "[PROMPT] Choose a model to install:"
-echo "1. LLaMA 2 7B Chat (default)"
-echo "2. Nous Hermes LLaMA2 7B"
-echo "3. Mistral-7B-Instruct (Experimental)"
+# ========== MODEL SELECTION ==========
+log_info "Choose a model to install:"
+echo "1) LLaMA 2 7B Chat (Meta)"
+echo "2) Mistral 7B Instruct (MistralAI)"
+echo "3) Zephyr 7B (HuggingFace Community)"
 read -rp "Enter your choice [1-3]: " MODEL_CHOICE
-MODEL_PATH="$MODEL_DIR/llama-2-7b-chat.Q4_K_M.gguf"
-MODEL_URL="$DEFAULT_MODEL_URL"
-
 case "$MODEL_CHOICE" in
-  2)
-    MODEL_PATH="$MODEL_DIR/nous-hermes-llama2-7b.Q4_K_M.gguf"
-    MODEL_URL="$ALTERNATE_MODEL_URL"
-    ;;
-  3)
-    MODEL_PATH="$MODEL_DIR/mistral-7b-instruct-v0.1.Q4_K_M.gguf"
-    MODEL_URL="https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.1-GGUF/resolve/main/mistral-7b-instruct-v0.1.Q4_K_M.gguf"
-    ;;
+    1)
+        MODEL_URL="https://huggingface.co/TheBloke/LLaMA-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q4_K_M.gguf"
+        MODEL_FILE="llama-2-7b-chat.Q4_K_M.gguf"
+        ;;
+    2)
+        MODEL_URL="https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.1-GGUF/resolve/main/mistral-7b-instruct-v0.1.Q4_K_M.gguf"
+        MODEL_FILE="mistral-7b-instruct-v0.1.Q4_K_M.gguf"
+        ;;
+    3)
+        MODEL_URL="https://huggingface.co/HuggingFaceH4/zephyr-7b-beta-GGUF/resolve/main/zephyr-7b-beta.Q4_K_M.gguf"
+        MODEL_FILE="zephyr-7b-beta.Q4_K_M.gguf"
+        ;;
+    *)
+        log_error "Invalid choice. Exiting."
+        exit 1
+        ;;
 esac
 
-mkdir -p "$MODEL_DIR"
-echo "[INFO] Downloading model ..."
-if ! curl -L "$MODEL_URL" -o "$MODEL_PATH"; then
-  echo "[WARN] Primary model download failed. Trying alternative mirror ..."
-  if ! curl -L "$ALTERNATE_MODEL_URL" -o "$MODEL_PATH"; then
-    echo "[ERROR] Failed to download model. Aborting."
-    exit 1
-  fi
-fi
+# ========== CLEANUP AND SETUP ==========
+log_info "Cleaning previous installations ..."
+rm -rf "$INSTALL_DIR"
+mkdir -p "$BUILD_DIR" "$MODEL_DIR"
 
-# Create script manager stub
-cat << 'EOF' > "$INSTALL_DIR/script_manager.sh"
+log_info "Installing system dependencies ..."
+sudo apt update && sudo apt install -y cmake build-essential curl python3-venv python3-dev git
+
+# ========== DOWNLOAD MODEL ==========
+log_info "Downloading model: $MODEL_FILE"
+if ! curl -fSL "$MODEL_URL" -o "$MODEL_DIR/$MODEL_FILE"; then
+    log_warn "Primary download failed. Retrying with wget ..."
+    if ! wget "$MODEL_URL" -O "$MODEL_DIR/$MODEL_FILE"; then
+        log_error "Failed to download model from both sources."
+        exit 1
+    fi
+fi
+log_success "Model downloaded."
+
+# ========== BUILD LLAMA.CPP ==========
+log_info "Cloning and building llama.cpp ..."
+git clone --depth 1 https://github.com/ggerganov/llama.cpp "$LLAMA_DIR"
+cd "$BUILD_DIR"
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+log_success "llama.cpp built successfully."
+
+# ========== CREATE SCRIPT MANAGER ==========
+log_info "Creating script manager agent ..."
+cat << 'EOF' > "$SCRIPT_MANAGER"
 #!/usr/bin/env bash
 PROMPT="$*"
-echo "[SCRIPT MANAGER] Received: $PROMPT"
-# Placeholder: script creation logic
+echo "[SCRIPT MANAGER] Handling script generation: $PROMPT"
+# Add logic here
 EOF
-chmod +x "$INSTALL_DIR/script_manager.sh"
+chmod +x "$SCRIPT_MANAGER"
 
-# Create AI CLI wrapper
-cat << EOF > "/usr/local/bin/ai"
+# ========== CREATE WRAPPER ==========
+log_info "Creating AI CLI wrapper script ..."
+cat << EOF | sudo tee "$AI_WRAPPER" >/dev/null
 #!/usr/bin/env bash
 set -euo pipefail
-LLAMA_BIN="$INSTALL_DIR/llama.cpp/build/bin/llama-simple-chat"
-MODEL_PATH="$MODEL_PATH"
-SCRIPT_MANAGER="$INSTALL_DIR/script_manager.sh"
-
+LLAMA_BIN="$BUILD_DIR/bin/llama-simple-chat"
+MODEL_PATH="$MODEL_DIR/$MODEL_FILE"
+SCRIPT_MANAGER="$SCRIPT_MANAGER"
 PROMPT="\$*"
-
-if [[ ! -x "\$LLAMA_BIN" ]]; then
-  echo "[ERROR] Llama binary not found at \$LLAMA_BIN"
-  exit 1
-fi
-
-if echo "\$PROMPT" | grep -Eiq "^(write|create|generate|make).*(script|program)"; then
-  echo "[AGENT MODE] Delegating to script manager."
-  bash "\$SCRIPT_MANAGER" "\$PROMPT"
-  exit 0
-fi
-
 echo "Running: \$LLAMA_BIN -m \"\$MODEL_PATH\" -p \"\$PROMPT\""
+if echo "\$PROMPT" | grep -Eiq "^(write|create|generate|make).*(script|program)"; then
+    echo "[AGENT MODE] Delegating to script manager ..."
+    bash "\$SCRIPT_MANAGER" "\$PROMPT"
+    exit 0
+fi
 exec "\$LLAMA_BIN" -m "\$MODEL_PATH" -p "\$PROMPT"
 EOF
+sudo chmod +x "$AI_WRAPPER"
+log_success "AI CLI wrapper script created at: $AI_WRAPPER"
 
-chmod +x "/usr/local/bin/ai"
-echo "[INFO] Installation complete! Run AI with: ai \"Your prompt here\""
+log_launch "Installation complete! Launch with: ai \"Your prompt here\""
