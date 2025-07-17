@@ -2,14 +2,16 @@
 set -euo pipefail
 
 ### === VERSION === ###
-echo 'Script v4.0'
+echo 'Script v4.1'
 
 # ========== CONFIGURATION ==========
 INSTALL_DIR="$HOME/.ai_cli_offline"
 VENV_DIR="$INSTALL_DIR/venv"
 MODEL_DIR="$INSTALL_DIR/models"
 SCRIPT_MANAGER="$INSTALL_DIR/script_manager.sh"
-AI_WRAPPER="/usr/local/bin/ai"
+# Install wrapper in user-local bin
+USER_BIN="$HOME/.local/bin"
+AI_WRAPPER="$USER_BIN/ai"
 DISK_REQUIRED_GB=10
 LOG_FILE="$INSTALL_DIR/conversation.txt"
 
@@ -33,8 +35,13 @@ FREE_GB=$(df "$HOME" | awk 'NR==2 {print int($4/1024/1024)}')
 log_success "Disk check passed: ${FREE_GB}GB free"
 
 # Create directories
-mkdir -p "$INSTALL_DIR" "$MODEL_DIR"
+mkdir -p "$INSTALL_DIR" "$MODEL_DIR" "$USER_BIN"
 touch "$LOG_FILE"
+
+# Ensure ~/.local/bin is in PATH
+if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
+  log_warn "~/.local/bin not in PATH; you may need to add 'export PATH=\"\$HOME/.local/bin:\$PATH\"' to your shell profile."
+fi
 
 # ========== VENV SETUP ==========
 log_info "Setting up Python virtual environment..."
@@ -42,6 +49,7 @@ python3 -m venv "$VENV_DIR"
 # shellcheck disable=SC1090
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip >/dev/null
+touch "$INSTALL_DIR/.venv_ready"
 log_success "Virtual environment ready"
 
 # ========== DEPENDENCIES ==========
@@ -81,24 +89,25 @@ EOF
 chmod +x "$SCRIPT_MANAGER"
 log_success "Script manager created"
 
-# ========== WRAPPER ==========
-cat > wrapper.sh << 'EOF'
+# ========== WRAPPER CREATION ==========
+cat > "$AI_WRAPPER" << 'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+# Activate venv
+source "$HOME/.ai_cli_offline/venv/bin/activate"
 PROMPT="$*"
-echo "$PROMPT" >> "$LOG_FILE"
-LAST=\$(tail -n1 "$LOG_FILE")
+echo "$PROMPT" >> "$HOME/.ai_cli_offline/conversation.txt"
+LAST=$(tail -n1 "$HOME/.ai_cli_offline/conversation.txt")
 # Agent detection
 if echo "$LAST" | grep -Eiq '^(write|create|generate|make).*(script|program)'; then
-  "\$HOME"/.ai_cli_offline/script_manager.sh "$LAST"
+  bash "$HOME/.ai_cli_offline/script_manager.sh" "$LAST"
 else
   # Use llm CLI to invoke the model
   llm --model-path "$HOME/.ai_cli_offline/models/$MODEL_FILE" "$LAST"
 fi
 EOF
-sudo mv wrapper.sh "$AI_WRAPPER"
-sudo chmod +x "$AI_WRAPPER"
+chmod +x "$AI_WRAPPER"
 log_success "AI CLI installed as 'ai' at $AI_WRAPPER"
 
-log_success "Installation complete. Use: ai 'Your prompt here'"
+log_success "Installation complete. Ensure ~/.local/bin is in your PATH, then use: ai 'Your prompt here'"
 exit 0
