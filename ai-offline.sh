@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
+echo "Script v2.1"
 # ========== CONFIGURATION ==========
 INSTALL_DIR="$HOME/.ai_cli_offline"
 LLAMA_DIR="$INSTALL_DIR/llama.cpp"
@@ -85,29 +85,40 @@ case "$MODEL_CHOICE" in
         ;;
 esac
 
-# ========== CLEANUP AND SETUP ==========
-log_info "Cleaning previous installations ..."
-sudo rm -rf "$INSTALL_DIR"
+# ========== PREPARE DIRECTORIES ==========
+log_info "Preparing installation directories ..."
 mkdir -p "$BUILD_DIR" "$MODEL_DIR"
 
+# ========== SYSTEM DEPENDENCIES ==========
 log_info "Installing system dependencies ..."
 sudo apt-get update -qq >/dev/null && sudo apt-get install -y -qq cmake build-essential curl python3-venv python3-dev git >/dev/null
 log_success "System dependencies installed."
 
 # ========== DOWNLOAD MODEL ==========
-log_info "Downloading model: $MODEL_FILE ..."
-if ! curl -fSL "$MODEL_URL" -o "$MODEL_DIR/$MODEL_FILE" 2>/dev/null; then
-    log_warn "Primary download failed. Retrying with wget ..."
-    if ! wget -q "$MODEL_URL" -O "$MODEL_DIR/$MODEL_FILE"; then
-        log_error "Failed to download model from both sources."
-        exit 1
+if [[ -f "$MODEL_DIR/$MODEL_FILE" ]]; then
+    log_warn "Model already exists at $MODEL_DIR/$MODEL_FILE. Skipping download."
+else
+    log_info "Downloading model: $MODEL_FILE ..."
+    if ! curl -fSL "$MODEL_URL" -o "$MODEL_DIR/$MODEL_FILE" 2>/dev/null; then
+        log_warn "Primary download failed. Retrying with wget ..."
+        if ! wget -q "$MODEL_URL" -O "$MODEL_DIR/$MODEL_FILE"; then
+            log_error "Failed to download model from both sources."
+            exit 1
+        fi
     fi
+    log_success "Model downloaded to: $MODEL_DIR/$MODEL_FILE"
 fi
-log_success "Model downloaded to: $MODEL_DIR/$MODEL_FILE"
 
-# ========== BUILD LLAMA.CPP ==========
-log_info "Cloning llama.cpp and building ..."
-git clone --depth 1 https://github.com/ggerganov/llama.cpp "$LLAMA_DIR" >/dev/null
+# ========== CLONE AND BUILD LLAMA.CPP ==========
+if [[ -d "$LLAMA_DIR/.git" ]]; then
+    log_warn "llama.cpp already cloned. Skipping clone."
+else
+    log_info "Cloning llama.cpp repository ..."
+    git clone --depth 1 https://github.com/ggerganov/llama.cpp "$LLAMA_DIR" >/dev/null
+    log_success "llama.cpp cloned."
+fi
+log_info "Building llama.cpp ..."
+mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 cmake .. -DCMAKE_BUILD_TYPE=Release >/dev/null
 make -j$(nproc) >/dev/null
