@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
+echo 'Script v2.2, Running Now...'
 # ========== CONFIGURATION ==========
 INSTALL_DIR="$HOME/.ai_cli_offline"
 LLAMA_DIR="$INSTALL_DIR/llama.cpp"
@@ -87,7 +87,13 @@ esac
 
 # ========== PREPARE DIRECTORIES ==========
 log_info "Preparing installation directories ..."
-mkdir -p "$BUILD_DIR" "$MODEL_DIR"
+mkdir -p "$MODEL_DIR"
+
+# Clean and reset llama.cpp directory
+if [[ -d "$LLAMA_DIR" ]]; then
+    log_warn "Removing existing llama.cpp directory ..."
+    rm -rf "$LLAMA_DIR"
+fi
 
 # ========== SYSTEM DEPENDENCIES ==========
 log_info "Installing system dependencies ..."
@@ -110,13 +116,9 @@ else
 fi
 
 # ========== CLONE AND BUILD LLAMA.CPP ==========
-if [[ -d "$LLAMA_DIR/.git" ]]; then
-    log_warn "llama.cpp already exists. Skipping clone."
-else
-    log_info "Cloning llama.cpp repository ..."
-    git clone --depth 1 https://github.com/ggerganov/llama.cpp "$LLAMA_DIR" >/dev/null
-    log_success "llama.cpp cloned."
-fi
+log_info "Cloning llama.cpp repository ..."
+git clone --depth 1 https://github.com/ggerganov/llama.cpp "$LLAMA_DIR" >/dev/null
+log_success "llama.cpp cloned."
 
 log_info "Cleaning build directory if present ..."
 rm -rf "$BUILD_DIR"
