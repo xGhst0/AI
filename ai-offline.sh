@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-### --- VERSION INFO --- ###
-echo 'Script v2.6'
+### === VERSION === ###
+echo 'Script v2.7'
 
 # ========== CONFIGURATION ==========
 INSTALL_DIR="$HOME/.ai_cli_offline"
@@ -14,14 +14,13 @@ AI_WRAPPER="/usr/local/bin/ai"
 INSTALLER_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/ai-offline.sh"
 TMP_UPDATE="$INSTALL_DIR/ai-offline.sh.tmp"
 DISK_REQUIRED_GB=10
-CONVERSATION_FILE="$INSTALL_DIR/conversation.txt"
-PROMPT_TMP_FILE="/tmp/ai_prompt.txt"
+LOG_FILE="$INSTALL_DIR/conversation.txt"
 
 # ========== EMOJI CONSTANTS ==========
-EMOJI_INFO="[\033[1;34m\u2139\033[0m]"
-EMOJI_WARN="[\033[1;33m\u26A0\033[0m]"
-EMOJI_SUCCESS="[\033[1;32m\u2705\033[0m]"
-EMOJI_ERROR="[\033[1;31m\u274C\033[0m]"
+EMOJI_INFO="[\033[1;34mℹ️\033[0m]"
+EMOJI_WARN="[\033[1;33m⚠️\033[0m]"
+EMOJI_SUCCESS="[\033[1;32m✅\033[0m]"
+EMOJI_ERROR="[\033[1;31m❌\033[0m]"
 EMOJI_ROCKET="[🚀]"
 
 # ========== ECHO WRAPPER ==========
@@ -36,21 +35,21 @@ if [[ "${1:-}" == "--update" ]]; then
   log_info "Checking for installer updates ..."
   mkdir -p "$INSTALL_DIR"
   if curl -fsSL "$INSTALLER_URL" -o "$TMP_UPDATE"; then
-    if ! cmp -s "$0" "$TMP_UPDATE"; then
-      log_info "Update found! Applying update ..."
-      if mv "$TMP_UPDATE" "$0" 2>/dev/null || sudo mv "$TMP_UPDATE" "$0"; then
-        log_success "Installer updated. Please re-run the script."
-        exit 0
+      if ! cmp -s "$0" "$TMP_UPDATE"; then
+          log_info "Update found! Applying update ..."
+          if mv "$TMP_UPDATE" "$0" 2>/dev/null || sudo mv "$TMP_UPDATE" "$0"; then
+              log_success "Installer updated. Please re-run the script."
+              exit 0
+          else
+              log_error "Failed to apply update. Check permissions."
+              exit 1
+          fi
       else
-        log_error "Failed to apply update. Check permissions."
-        exit 1
+          rm "$TMP_UPDATE"
+          log_info "Installer is up to date."
       fi
-    else
-      rm "$TMP_UPDATE"
-      log_info "Installer is up to date."
-    fi
   else
-    log_warn "Could not check for updates. Continuing ..."
+      log_warn "Could not check for updates. Continuing ..."
   fi
   exit 0
 fi
@@ -59,10 +58,10 @@ fi
 log_info "Checking for at least ${DISK_REQUIRED_GB}GB of free space ..."
 FREE_GB=$(df "$HOME" | awk 'NR==2 {print int($4/1024/1024)}')
 if (( FREE_GB < DISK_REQUIRED_GB )); then
-  log_error "Not enough disk space. Required: ${DISK_REQUIRED_GB}GB, Available: ${FREE_GB}GB"
-  exit 1
+    log_error "Not enough disk space. Required: ${DISK_REQUIRED_GB}GB, Available: ${FREE_GB}GB"
+    exit 1
 else
-  log_success "Sufficient disk space available: ${FREE_GB}GB"
+    log_success "Sufficient disk space available: ${FREE_GB}GB"
 fi
 
 # ========== MODEL SELECTION ==========
@@ -72,41 +71,38 @@ echo "2) 💬 Mistral 7B Instruct (MistralAI)"
 echo "3) 🦊 Zephyr 7B (HuggingFace Community)"
 read -rp "Enter your choice [1-3]: " MODEL_CHOICE
 case "$MODEL_CHOICE" in
-  1)
-    MODEL_URL="https://huggingface.co/TheBloke/LLaMA-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q4_K_M.gguf"
-    MODEL_FILE="llama-2-7b-chat.Q4_K_M.gguf"
-    ;;
-  2)
-    MODEL_URL="https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.1-GGUF/resolve/main/mistral-7b-instruct-v0.1.Q4_K_M.gguf"
-    MODEL_FILE="mistral-7b-instruct-v0.1.Q4_K_M.gguf"
-    ;;
-  3)
-    MODEL_URL="https://huggingface.co/HuggingFaceH4/zephyr-7b-beta-GGUF/resolve/main/zephyr-7b-beta.Q4_K_M.gguf"
-    MODEL_FILE="zephyr-7b-beta.Q4_K_M.gguf"
-    ;;
-  *)
-    log_error "Invalid choice. Exiting."
-    exit 1
-    ;;
+    1)
+        MODEL_URL="https://huggingface.co/TheBloke/LLaMA-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q4_K_M.gguf"
+        MODEL_FILE="llama-2-7b-chat.Q4_K_M.gguf"
+        ;;
+    2)
+        MODEL_URL="https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.1-GGUF/resolve/main/mistral-7b-instruct-v0.1.Q4_K_M.gguf"
+        MODEL_FILE="mistral-7b-instruct-v0.1.Q4_K_M.gguf"
+        ;;
+    3)
+        MODEL_URL="https://huggingface.co/HuggingFaceH4/zephyr-7b-beta-GGUF/resolve/main/zephyr-7b-beta.Q4_K_M.gguf"
+        MODEL_FILE="zephyr-7b-beta.Q4_K_M.gguf"
+        ;;
+    *)
+        log_error "Invalid choice. Exiting."
+        exit 1
+        ;;
 esac
 
 # ========== PREPARE DIRECTORIES ==========
 log_info "Preparing installation directories ..."
 mkdir -p "$MODEL_DIR"
-mkdir -p "$BUILD_DIR"
-> "$CONVERSATION_FILE"
 
-# Clone llama.cpp
 if [[ -d "$LLAMA_DIR/.git" ]]; then
-  log_warn "llama.cpp already cloned. Skipping clone step."
+    log_warn "llama.cpp already cloned. Skipping clone step."
 else
-  if [[ -d "$LLAMA_DIR" ]]; then
-    log_warn "llama.cpp exists but appears incomplete. Backing up."
-    mv "$LLAMA_DIR" "$LLAMA_DIR.bak.$(date +%s)"
-  fi
-  log_info "Cloning llama.cpp repository ..."
-  git clone --depth 1 https://github.com/ggerganov/llama.cpp "$LLAMA_DIR" >/dev/null
-  log_success "llama.cpp cloned."
+    if [[ -d "$LLAMA_DIR" ]]; then
+        log_warn "llama.cpp exists but appears incomplete. Backing up."
+        mv "$LLAMA_DIR" "$LLAMA_DIR.bak.$(date +%s)"
+    fi
+    log_info "Cloning llama.cpp repository ..."
+    git clone --depth 1 https://github.com/ggerganov/llama.cpp "$LLAMA_DIR" >/dev/null
+    log_success "llama.cpp cloned."
 fi
 
 # ========== SYSTEM DEPENDENCIES ==========
@@ -116,17 +112,17 @@ log_success "System dependencies installed."
 
 # ========== DOWNLOAD MODEL ==========
 if [[ -f "$MODEL_DIR/$MODEL_FILE" ]]; then
-  log_warn "Model already exists at $MODEL_DIR/$MODEL_FILE. Skipping download."
+    log_warn "Model already exists at $MODEL_DIR/$MODEL_FILE. Skipping download."
 else
-  log_info "Downloading model: $MODEL_FILE ..."
-  if ! curl -fSL "$MODEL_URL" -o "$MODEL_DIR/$MODEL_FILE" 2>/dev/null; then
-    log_warn "Primary download failed. Retrying with wget ..."
-    if ! wget -q "$MODEL_URL" -O "$MODEL_DIR/$MODEL_FILE"; then
-      log_error "Failed to download model from both sources."
-      exit 1
+    log_info "Downloading model: $MODEL_FILE ..."
+    if ! curl -fSL "$MODEL_URL" -o "$MODEL_DIR/$MODEL_FILE" 2>/dev/null; then
+        log_warn "Primary download failed. Retrying with wget ..."
+        if ! wget -q "$MODEL_URL" -O "$MODEL_DIR/$MODEL_FILE"; then
+            log_error "Failed to download model from both sources."
+            exit 1
+        fi
     fi
-  fi
-  log_success "Model downloaded to: $MODEL_DIR/$MODEL_FILE"
+    log_success "Model downloaded to: $MODEL_DIR/$MODEL_FILE"
 fi
 
 # ========== BUILD LLAMA.CPP ==========
@@ -141,65 +137,41 @@ log_success "llama.cpp built successfully."
 
 # ========== CREATE SCRIPT MANAGER ==========
 log_info "Creating script manager agent ..."
-cat << EOF > "$SCRIPT_MANAGER"
+cat << 'EOF' > "$SCRIPT_MANAGER"
 #!/usr/bin/env bash
-set -euo pipefail
-USER_PROMPT="\$*"
-CONVERSATION_FILE="$CONVERSATION_FILE"
-PROMPT_TMP_FILE="$PROMPT_TMP_FILE"
-
-if [[ "\$USER_PROMPT" =~ ^(reset|clear|start\ over)\$ ]]; then
-  echo "[SCRIPT MANAGER] Resetting conversation history."
-  > "\$CONVERSATION_FILE"
-  echo "Conversation history cleared."
-  exit 0
-fi
-
-echo "User: \$USER_PROMPT" >> "\$CONVERSATION_FILE"
-cp "\$CONVERSATION_FILE" "\$PROMPT_TMP_FILE"
-
-AI_BIN="$BUILD_DIR/bin/llama-simple-chat"
-MODEL_PATH="$MODEL_DIR/$MODEL_FILE"
-
-AI_RESPONSE=\$( "\$AI_BIN" -m "\$MODEL_PATH" -f "\$PROMPT_TMP_FILE" )
-echo "AI: \$AI_RESPONSE" >> "\$CONVERSATION_FILE"
-echo "\$AI_RESPONSE"
+PROMPT="$*"
+echo "[SCRIPT MANAGER] Handling script generation: $PROMPT"
+# Add logic here to handle prompt parsing
 EOF
 chmod +x "$SCRIPT_MANAGER"
 log_success "Script manager created."
 
-# ========== CREATE WRAPPER ==========
+# ========== CREATE AI WRAPPER ==========
 log_info "Creating AI CLI wrapper script ..."
+RESOLVED_LLAMA_BIN="$BUILD_DIR/bin/llama-simple-chat"
+RESOLVED_MODEL_PATH="$MODEL_DIR/$MODEL_FILE"
+RESOLVED_SCRIPT_MANAGER="$SCRIPT_MANAGER"
+
 cat << EOF | sudo tee "$AI_WRAPPER" >/dev/null
 #!/usr/bin/env bash
 set -euo pipefail
-SCRIPT_MANAGER="$SCRIPT_MANAGER"
-CONVERSATION_FILE="$CONVERSATION_FILE"
-PROMPT_TMP_FILE="$PROMPT_TMP_FILE"
+LLAMA_BIN="$RESOLVED_LLAMA_BIN"
+MODEL_PATH="$RESOLVED_MODEL_PATH"
+SCRIPT_MANAGER="$RESOLVED_SCRIPT_MANAGER"
+LOG_FILE="$LOG_FILE"
 
-PROMPT="\$(printf "%s " "\$@")"
-PROMPT="\${PROMPT% }"
+PROMPT="\$*"
+echo "\$PROMPT" >> "\$LOG_FILE"
+LAST_LINE=\$(tail -n 1 "\$LOG_FILE")
 
-if [[ "\$PROMPT" =~ ^(reset|clear|start\ over)\$ ]]; then
-  echo "Reset command detected. Clearing conversation history."
-  > "\$CONVERSATION_FILE"
-  exit 0
+if echo "\$LAST_LINE" | grep -Eiq "^(write|create|generate|make).*(script|program)"; then
+    echo "[AGENT MODE] Delegating to script manager ..."
+    bash "\$SCRIPT_MANAGER" "\$LAST_LINE"
+    exit 0
 fi
 
-if echo "\$PROMPT" | grep -Eiq "^(write|create|generate|make).*(script|program)"; then
-  echo "[AGENT MODE] Delegating to script manager ..."
-  bash "\$SCRIPT_MANAGER" "\$PROMPT"
-  exit 0
-fi
-
-echo "User: \$PROMPT" >> "\$CONVERSATION_FILE"
-cp "\$CONVERSATION_FILE" "\$PROMPT_TMP_FILE"
-
-AI_BIN="$BUILD_DIR/bin/llama-simple-chat"
-MODEL_PATH="$MODEL_DIR/$MODEL_FILE"
-AI_RESPONSE=\$( "\$AI_BIN" -m "\$MODEL_PATH" -f "\$PROMPT_TMP_FILE" )
-echo "AI: \$AI_RESPONSE" >> "\$CONVERSATION_FILE"
-echo "\$AI_RESPONSE"
+exec "\$LLAMA_BIN" -m "\$MODEL_PATH" -p "\$LAST_LINE"
 EOF
+
 sudo chmod +x "$AI_WRAPPER"
 log_success "AI CLI wrapper created at: $AI_WRAPPER"
