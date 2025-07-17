@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
+echo 'Script v2.3'
 # ========== CONFIGURATION ==========
 INSTALL_DIR="$HOME/.ai_cli_offline"
 LLAMA_DIR="$INSTALL_DIR/llama.cpp"
