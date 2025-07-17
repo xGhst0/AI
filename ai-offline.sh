@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ### === VERSION === ###
-echo 'Script v5.0'
+echo 'Script v5.1'
 
 # ========== CONFIGURATION ==========
 INSTALL_DIR="$HOME/.ai_cli_offline"
@@ -14,6 +14,7 @@ USER_BIN="$HOME/.local/bin"
 AI_WRAPPER="$USER_BIN/ai"
 DISK_REQUIRED_GB=10
 LOG_FILE="$INSTALL_DIR/conversation.txt"
+BACKUP_DIR="$INSTALL_DIR/backups"
 INSTALLER_URL="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/ai-offline.sh"
 TMP_UPDATE="$INSTALL_DIR/ai-offline.sh.tmp"
 
@@ -23,73 +24,80 @@ EMOJI_WARN="[\033[1;33m⚠️\033[0m]"
 EMOJI_SUCCESS="[\033[1;32m✅\033[0m]"
 EMOJI_ERROR="[\033[1;31m❌\033[0m]"
 
-# ========== LOGGER ==========
-log() { echo -e "$1 $2"; }
-log_info()    { log "$EMOJI_INFO" "$1"; }
-log_warn()    { log "$EMOJI_WARN" "$1"; }
-log_success() { log "$EMOJI_SUCCESS" "$1"; }
-log_error()   { log "$EMOJI_ERROR" "$1"; exit 1; }
+# ========== LOG FUNCTIONS ==========
+log_info()    { echo -e "${EMOJI_INFO} $1"; }
+log_warn()    { echo -e "${EMOJI_WARN} $1"; }
+log_success(){ echo -e "${EMOJI_SUCCESS} $1"; }
+log_error(){ echo -e "${EMOJI_ERROR} $1"; exit 1; }
 
 # ========== HANDLE --update ==========
 if [[ "${1:-}" == "--update" ]]; then
-  log_info "Checking for installer updates..."
-  mkdir -p "$INSTALL_DIR"
+  log_info "Checking for updates..."
+  mkdir -p "$INSTALL_DIR" "$BACKUP_DIR"
   if curl -fsSL "$INSTALLER_URL" -o "$TMP_UPDATE"; then
     if ! cmp -s "$INSTALLER" "$TMP_UPDATE"; then
-      log_info "Backup and apply update"
-      cp "$INSTALLER" "$INSTALL_DIR/installer_backup_$(date +%Y%m%d%H%M%S).sh"
-      mv "$TMP_UPDATE" "$INSTALLER"
-      chmod +x "$INSTALLER"
-      log_success "Installer updated. Rerun without --update."
+      mkdir -p "$BACKUP_DIR"
+      cp "$INSTALLER" "$BACKUP_DIR/installer_backup_$(date +%Y%m%d%H%M%S).sh"
+      mv "$TMP_UPDATE" "$INSTALLER" && chmod +x "$INSTALLER"
+      log_success "Installer updated. Run without --update."
     else
-      log_info "Installer is already up to date"
-      rm "$TMP_UPDATE"
+      log_info "Installer already up to date"
+      rm -f "$TMP_UPDATE"
     fi
   else
-    log_warn "Unable to fetch updates"
+    log_warn "Could not fetch update"
   fi
   exit 0
 fi
 
 # ========== PRECHECKS ==========
-mkdir -p "$INSTALL_DIR" "$MODEL_DIR" "$USER_BIN"
+mkdir -p "$INSTALL_DIR" "$MODEL_DIR" "$USER_BIN" "$BACKUP_DIR"
 touch "$LOG_FILE" "$INSTALLER"
 FREE_GB=$(df "$HOME" | awk 'NR==2 {print int($4/1024/1024)}')
-(( FREE_GB < DISK_REQUIRED_GB )) && log_error "Require ${DISK_REQUIRED_GB}GB, have ${FREE_GB}GB"
+(( FREE_GB < DISK_REQUIRED_GB )) && log_error "Require ${DISK_REQUIRED_GB}GB free, have ${FREE_GB}GB"
 log_success "Disk OK: ${FREE_GB}GB free"
 if ! echo "$PATH" | grep -q "$USER_BIN"; then
   log_warn "Add '$USER_BIN' to PATH"
 fi
 
-# ========== VENV & DEPENDENCIES ==========
+# ========== CLEAN OLD BACKENDS ==========
+for dir in gpt4all gpt4all.cpp llama.cpp; do
+  inst="${INSTALL_DIR}/${dir}"
+  if [[ -d "$inst" ]]; then
+    log_warn "Removing old backend: $dir"
+    mv "$inst" "$BACKUP_DIR/${dir}_$(date +%s)"
+  fi
+done
+rm -f "$AI_WRAPPER"
+log_info "Old wrapper removed"
+
+# ========== VENV SETUP ==========
 log_info "Creating virtual environment..."
 python3 -m venv "$VENV_DIR"
-# shellcheck disable=SC1090
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip >/dev/null
 pip install --quiet llama-cpp-python llm >/dev/null
-log_success "Venv ready with llama-cpp-python & llm"
+log_success "Venv ready"
 
 # ========== MODEL SELECTION ==========
-log_info "Select a model:"
-echo "1) LLaMA 2 7B Chat"
-echo "2) Mistral 7B Instruct"
-echo "3) Zephyr 7B"
-read -rp "Enter choice [1-3]: " CHOICE
-case "$CHOICE" in
-  1) MODEL_FILE="llama-2-7b-chat.Q4_K_M.gguf"; MODEL_URL="https://huggingface.co/TheBloke/LLaMA-2-7B-Chat-GGUF/resolve/main/$MODEL_FILE";;
-  2) MODEL_FILE="mistral-7b-instruct-v0.1.Q4_K_M.gguf"; MODEL_URL="https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.1-GGUF/resolve/main/$MODEL_FILE";;
-  3) MODEL_FILE="zephyr-7b-beta.Q4_K_M.gguf"; MODEL_URL="https://huggingface.co/HuggingFaceH4/zephyr-7b-beta-GGUF/resolve/main/$MODEL_FILE";;
-  *) log_error "Invalid selection";;
-esac
+log_info "Select model:"
+PS3="Choice [1-3]: "
+select opt in "LLaMA 2 7B Chat" "Mistral 7B Instruct" "Zephyr 7B"; do
+  case \$REPLY in
+    1) MODEL_FILE=llama-2-7b-chat.Q4_K_M.gguf; MODEL_URL="https://huggingface.co/TheBloke/LLaMA-2-7B-Chat-GGUF/resolve/main/$MODEL_FILE"; break;;
+    2) MODEL_FILE=mistral-7b-instruct-v0.1.Q4_K_M.gguf; MODEL_URL="https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.1-GGUF/resolve/main/$MODEL_FILE"; break;;
+    3) MODEL_FILE=zephyr-7b-beta.Q4_K_M.gguf; MODEL_URL="https://huggingface.co/HuggingFaceH4/zephyr-7b-beta-GGUF/resolve/main/$MODEL_FILE"; break;;
+    *) log_warn "Invalid selection";;
+  esac
+done
 
-# ========== DOWNLOAD MODEL ==========
+# ========== MODEL DOWNLOAD ==========
 if [[ ! -f "$MODEL_DIR/$MODEL_FILE" ]]; then
   log_info "Downloading $MODEL_FILE..."
-  curl -fsSL "$MODEL_URL" -o "$MODEL_DIR/$MODEL_FILE" || wget -q "$MODEL_URL" -O "$MODEL_DIR/$MODEL_FILE" || log_error "Model download failed"
-  log_success "Model saved: $MODEL_DIR/$MODEL_FILE"
+  curl -fsSL "$MODEL_URL" -o "$MODEL_DIR/$MODEL_FILE" || wget -q "$MODEL_URL" -O "$MODEL_DIR/$MODEL_FILE" || log_error "Failed download"
+  log_success "Model saved to $MODEL_DIR/$MODEL_FILE"
 else
-  log_warn "Model already exists, skipping download"
+  log_info "Model exists, skipping"
 fi
 
 # ========== SCRIPT MANAGER ==========
@@ -97,31 +105,27 @@ cat > "$SCRIPT_MANAGER" << 'EOF'
 #!/usr/bin/env bash
 PROMPT="$*"
 echo "[SCRIPT MANAGER] \$PROMPT"
-# custom logic here
+# custom logic
 EOF
 chmod +x "$SCRIPT_MANAGER"
-log_success "Script manager at $SCRIPT_MANAGER"
+log_success "Script manager ready"
 
 # ========== WRAPPER CREATION ==========
 cat > "$AI_WRAPPER" << EOF
 #!/usr/bin/env bash
 set -euo pipefail
-# Activate environment
 source "$VENV_DIR/bin/activate"
 PROMPT="\$*"
-# Log prompt
 echo "\$PROMPT" >> "$LOG_FILE"
 LAST=\$(tail -n1 "$LOG_FILE")
-if [[ "\$LAST" == "--update" ]]; then
-  exec "$INSTALLER" --update
-elif echo "\$LAST" | grep -Eiq '^(write|create|generate|make).*(script|program)'; then
-  bash "$SCRIPT_MANAGER" "\$LAST"
-else
-  llm --model-path "$MODEL_DIR/$MODEL_FILE" "\$LAST"
-fi
+case "\$LAST" in
+  --update) exec "$INSTALLER" --update;;
+  write*|create*|generate*|make*) bash "$SCRIPT_MANAGER" "\$LAST";;
+  *) llm --model-path "$MODEL_DIR/$MODEL_FILE" "\$LAST";;
+esac
 EOF
 chmod +x "$AI_WRAPPER"
 log_success "Wrapper installed at $AI_WRAPPER"
 
-log_success "Installation complete (v5.0). Use 'ai --update' to update and 'ai "Your prompt"' to chat."
+log_success "Installation v5.1 complete. Use 'ai --update' and 'ai "Your prompt"'"
 exit 0
