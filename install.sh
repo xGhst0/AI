@@ -7,7 +7,7 @@
 # Assuming 'main' is the branch for install.sh and 'm' for others.
 # Adjust BASE_URL_MAIN and BASE_URL_SUB accordingly.
 BASE_URL_MAIN="https://github.com/Xghst0/AI/blob/main"
-BASE_URL_SUB="https://github.com/Xghst0/AI/blob/m"
+BASE_URL_SUB=$BASE_URL_MAIN
 
 INSTALL_SH_URL="${BASE_URL_MAIN}/install.sh"
 MODEL_INSTALL_URL="${BASE_URL_SUB}/Model_Install.sh"
@@ -25,7 +25,7 @@ LOG_FILE="$HOME/install.log"
 
 # --- Script Version (for self-update) ---
 # This version string is embedded in the script for easy extraction and comparison.
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.0.1"
 
 # --- Logging Functions ---
 # Function to log messages with timestamps and levels
