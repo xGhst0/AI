@@ -3,7 +3,7 @@
 # --- Configuration ---
 
 BASE_URL_MAIN="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main"
-BASE_URL_SUB=$BASE_URL_MAIN
+BASE_URL_SUB="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main"
 
 INSTALL_SH_URL="${BASE_URL_MAIN}/install.sh"
 MODEL_INSTALL_URL="${BASE_URL_SUB}/Model_Install.sh"
