@@ -1,12 +1,8 @@
 #!/bin/bash
 
 # --- Configuration ---
-# Base URL for GitHub repository (replace with your actual base URL)
-# The image shows "https://github.com/Xghst0/AI/blob/main/install.sh"
-# and "https://github.com/Xghst0/AI/blob/m" for sub-scripts.
-# Assuming 'main' is the branch for install.sh and 'm' for others.
-# Adjust BASE_URL_MAIN and BASE_URL_SUB accordingly.
-BASE_URL_MAIN="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main/"
+
+BASE_URL_MAIN="https://raw.githubusercontent.com/xGhst0/AI/refs/heads/main"
 BASE_URL_SUB=$BASE_URL_MAIN
 
 INSTALL_SH_URL="${BASE_URL_MAIN}/install.sh"
