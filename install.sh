@@ -21,7 +21,7 @@ LOG_FILE="$HOME/install.log"
 
 # --- Script Version (for self-update) ---
 # This version string is embedded in the script for easy extraction and comparison.
-SCRIPT_VERSION="1.0.1"
+SCRIPT_VERSION="1.0.2"
 
 # --- Logging Functions ---
 # Function to log messages with timestamps and levels
