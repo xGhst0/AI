@@ -32,7 +32,7 @@ status "⬇️ Downloading model..."
 download_with_retry() {
   local retries=3
   for ((i=1;i<=retries;i++)); do
-    huggingface-cli download "$REPO" "$FILE" --local-dir . && return 0
+    huggingface-cli download "$REPO" "$FILE" "?download=true" --local-dir . && return 0
     log "Attempt $i to download failed."
     sleep 2
   done
