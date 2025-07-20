@@ -22,7 +22,7 @@ read -rp "Enter 1, 2 or 3: " CHOICE
 case "$CHOICE" in
   1) REPO="TheBloke/llama2_7b_chat_uncensored-GGUF"; FILE="llama2_7b_chat_uncensored.q2_K.gguf"; ;;
   2) REPO="mradermacher/Qwen2.5-0.5B-Instruct-uncensored-GGUF"; FILE="qwen2.5-0.5B-Instruct-uncensored.Q3_K.gguf"; ;;
-  3) REPO="https://huggingface.co/TheBloke/WizardLM-7B-uncensored-GGUF/resolve/main/"; FILE="WizardLM-7B-uncensored.Q3_K_M.gguf"; ;;
+  3) REPO="https://huggingface.co/TheBloke/WizardLM-7B-uncensored-GGUF/resolve/main"; FILE="WizardLM-7B-uncensored.Q3_K_M.gguf"; ;;
   *) status "❌ Invalid choice. Exiting."; exit 1 ;;
 esac
 
